@@ -264,6 +264,17 @@ function setupGeneralIpcHandlers() {
         return app.getVersion();
     });
 
+    // The StandMeet roles for the start screen's role picker (one role per interview).
+    ipcMain.handle('standmeet:list-roles', async () => {
+        try {
+            const host = storage.getPreferences().standmeetHost || 'https://sijie.xyz';
+            return { success: true, data: await require('./utils/standmeet').listRoles(host) };
+        } catch (error) {
+            console.error('Error listing StandMeet roles:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
     ipcMain.handle('quit-application', async event => {
         try {
             stopMacOSAudioCapture();

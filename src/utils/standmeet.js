@@ -208,18 +208,59 @@ function projectOverview(notes) {
         .join('\n');
 }
 
-// loadCorpus — reads every wiki note and builds the index. onProgress(done, total) for the status
-// line. Resolves with the note count.
-async function loadCorpus(host, onProgress = () => {}) {
+// ── roles: one StandMeet role per interview ──
+//
+// A role's corpus_uris ("wiki://software/**", "subjectivity://cv", …) decide which notes this
+// interview's cues may draw on, and its description says what the interview is for. The same
+// roles scope what visitors see on the instance; here they scope the user's own cue context.
+
+const LISTABLE = ['wiki', 'output', 'subjectivity']; // genres corpus.list serves
+
+// uriMatcher — a role's URI globs as one test: "**" spans segments, "*" stays inside one, and
+// "a/**" also covers "a" itself.
+function uriMatcher(globs) {
+    const patterns = globs.map(g => {
+        const re = g
+            .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+            .replace(/\/\*\*$/, '(/.*)?')
+            .replace(/\*\*/g, '.*')
+            .replace(/(?<!\.)\*/g, '[^/]*');
+        return new RegExp(`^${re}$`);
+    });
+    return uri => patterns.some(p => p.test(uri));
+}
+
+// listRoles — the user's roles for the start screen.
+async function listRoles(host) {
     const client = createClient(host.replace(/\/$/, ''));
     await client.connect();
-    const listed = await listAll(client, 'wiki');
+    const page = await client.tool('role_list', { limit: 200 });
+    return page.items.map(r => ({ id: r.id, name: r.name, description: r.description || '', corpus_uris: r.corpus_uris || [] }));
+}
+
+let roleBrief = ''; // "this interview is for …", from the chosen role
+
+// loadCorpus — reads the notes the role may see (all wiki notes when there is no role) and builds
+// the index. onProgress(done, total) for the status line. Resolves with the note count.
+async function loadCorpus(host, role = null, onProgress = () => {}) {
+    const client = createClient(host.replace(/\/$/, ''));
+    await client.connect();
+    const globs = role ? role.corpus_uris : ['wiki://**'];
+    const inScope = uriMatcher(globs);
+    const genres = LISTABLE.filter(g => globs.some(u => u.startsWith(`${g}://`)));
+    const listed = [];
+    for (const genre of genres) {
+        for (const item of await listAll(client, genre)) {
+            if (inScope(`${genre}://${item.path || ''}`)) listed.push({ ...item, genre });
+        }
+    }
     let done = 0;
     const notes = await mapLimit(listed, CONCURRENCY, async item => {
-        const full = await client.tool('corpus.get', { genre: 'wiki', id: item.id }).catch(() => null);
+        const full = await client.tool('corpus.get', { genre: item.genre, id: item.id }).catch(() => null);
         onProgress(++done, listed.length);
         return { title: item.title, path: item.path || '', text: cleanBody(full ? full.body : item.preview) };
     });
+    roleBrief = role ? `${role.name}${role.description ? ` — ${role.description}` : ''}` : '';
     const usable = notes.filter(n => n.text || n.title);
     projects = projectOverview(usable);
     vocabulary = usable
@@ -240,7 +281,8 @@ function contextFor(query) {
     const fromProjects = search(index, query, PROJECT_K, n => n.path.startsWith('software/project/'));
     const picked = [...general, ...fromProjects.filter(n => !general.includes(n))];
     const notes = picked.map(n => `## ${n.title} (${n.path})\n${n.text.slice(0, CONTEXT_CHARS)}`).join('\n\n');
-    return `# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
+    const brief = roleBrief ? `# This interview\n${roleBrief}\nLead with what matters for this role.\n\n` : '';
+    return `${brief}# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
 }
 
 function isLoaded() {
@@ -255,4 +297,4 @@ function transcriptionHint() {
     return vocabulary;
 }
 
-module.exports = { loadCorpus, contextFor, isLoaded, transcriptionHint, cleanBody, buildIndex, search };
+module.exports = { loadCorpus, listRoles, contextFor, isLoaded, transcriptionHint, cleanBody, buildIndex, search, uriMatcher };

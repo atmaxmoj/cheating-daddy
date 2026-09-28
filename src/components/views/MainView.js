@@ -703,6 +703,9 @@ export class MainView extends LitElement {
         _deepseekKey: { state: true },
         _relayUrl: { state: true },
         _relayToken: { state: true },
+        _roles: { state: true },
+        _roleId: { state: true },
+        _rolesError: { state: true },
         _geminiLiveModel: { state: true },
         _groqModel: { state: true },
         _groqImageModel: { state: true },
@@ -735,6 +738,9 @@ export class MainView extends LitElement {
         this._deepseekKey = '';
         this._relayUrl = '';
         this._relayToken = '';
+        this._roles = [];
+        this._roleId = '';
+        this._rolesError = '';
         this._geminiLiveModel = 'gemini-3.1-flash-live-preview';
         this._groqModel = 'qwen/qwen3.6-27b';
         this._groqImageModel = 'qwen/qwen3.6-27b';
@@ -778,6 +784,8 @@ export class MainView extends LitElement {
             this._deepseekKey = creds.deepseekApiKey || '';
             this._relayToken = creds.relayToken || '';
             this._relayUrl = prefs.relayUrl || '';
+            this._roleId = prefs.standmeetRoleId || '';
+            this._loadRoles();
             this._geminiLiveModel = config.geminiLiveModel || 'gemini-3.1-flash-live-preview';
             this._groqModel = config.groqModel || 'qwen/qwen3.6-27b';
             this._groqImageModel = config.groqImageModel || 'qwen/qwen3.6-27b';
@@ -955,6 +963,41 @@ export class MainView extends LitElement {
         this._keyError = false;
         await cheatingDaddy.storage.setCredentials({ deepseekApiKey: val });
         this.requestUpdate();
+    }
+
+    // _loadRoles — the user's StandMeet roles, one per interview (its corpus scope + what it is for).
+    async _loadRoles() {
+        if (!window.require) return;
+        const { ipcRenderer } = window.require('electron');
+        const result = await ipcRenderer.invoke('standmeet:list-roles').catch(error => ({ success: false, error: error.message }));
+        this._roles = result.success ? result.data : [];
+        this._rolesError = result.success ? '' : `Could not load your StandMeet roles: ${result.error}`;
+        this.requestUpdate();
+    }
+
+    async _saveRoleId(val) {
+        this._roleId = val;
+        await cheatingDaddy.storage.updatePreference('standmeetRoleId', val);
+        this.requestUpdate();
+    }
+
+    _renderRolePicker() {
+        const role = this._roles.find(r => r.id === this._roleId);
+        return html`
+            <div class="form-group">
+                <label class="form-label">Interview role</label>
+                <select .value=${this._roleId} @change=${e => this._saveRoleId(e.target.value)}>
+                    <option value="" ?selected=${this._roleId === ''}>Whole wiki (no role)</option>
+                    ${this._roles.map(r => html`<option value=${r.id} ?selected=${r.id === this._roleId}>${r.name}</option>`)}
+                </select>
+                <div class="form-hint">
+                    ${this._rolesError ||
+                    (role
+                        ? `${role.description || 'No description'} · reads ${role.corpus_uris.join(', ') || 'published notes only'}`
+                        : 'Cues draw on every wiki note. Create a role in StandMeet for each interview to scope them.')}
+                </div>
+            </div>
+        `;
     }
 
     async _saveRelayUrl(val) {
@@ -1282,6 +1325,8 @@ export class MainView extends LitElement {
 
     _renderLocalMode() {
         return html`
+            ${this._renderRolePicker()}
+
             <details class="config-section">
                 <summary class="config-summary">
                     <span class="config-summary-text">

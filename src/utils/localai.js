@@ -505,6 +505,15 @@ async function startLlamaServer(executablePath, modelPath, projectorPath) {
     await waitForServer(`${llamaBaseUrl}/health`, llamaProcess, 30 * 60 * 1000);
 }
 
+// findRole — the role picked on the start screen; null when none is picked. A picked role that no
+// longer exists is an error, not a silent fall back to the whole corpus.
+async function findRole(host, roleId) {
+    if (!roleId) return null;
+    const role = (await standmeet.listRoles(host)).find(r => r.id === roleId);
+    if (!role) throw new Error('the chosen role no longer exists — pick another on the start screen');
+    return role;
+}
+
 async function initializeLocalSession(model, whisperModel, profile, customPrompt) {
     console.log('[LocalAI] Initializing native local session:', { model, whisperModel, profile });
     sendToRenderer('session-initializing', true);
@@ -523,14 +532,19 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
             throw new Error('Add your DeepSeek API key to use DeepSeek');
         }
 
-        // Cue Cards: read the corpus while Whisper downloads and starts (about 20 s for ~700 notes).
+        // Cue Cards: read the corpus while Whisper downloads and starts (about 20 s for ~700 notes),
+        // scoped to the StandMeet role chosen for this interview (none = every wiki note).
         let corpusProgress = '';
+        const prefs = getPreferences();
+        const host = prefs.standmeetHost || 'https://sijie.xyz';
         const corpusLoad =
             profile === 'cues'
-                ? standmeet
-                      .loadCorpus(getPreferences().standmeetHost || 'https://sijie.xyz', (done, total) => {
-                          corpusProgress = `${done}/${total}`;
-                      })
+                ? findRole(host, prefs.standmeetRoleId)
+                      .then(role =>
+                          standmeet.loadCorpus(host, role, (done, total) => {
+                              corpusProgress = `${done}/${total}`;
+                          }),
+                      )
                       .then(
                           count => ({ count }),
                           error => ({ error }),

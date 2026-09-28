@@ -2,7 +2,15 @@
 // cleaning and retrieval ranking. (Loading the corpus needs a live instance and credentials.)
 
 const assert = require('assert');
-const { cleanBody, buildIndex, search } = require('./standmeet');
+const { cleanBody, buildIndex, search, uriMatcher } = require('./standmeet');
+
+const inScope = uriMatcher(['wiki://software/project/standmeet/**', 'subjectivity://cv', 'output://*']);
+assert.ok(inScope('wiki://software/project/standmeet'), 'a/** covers a itself');
+assert.ok(inScope('wiki://software/project/standmeet/architecture/key-designs'));
+assert.ok(!inScope('wiki://software/project/youteacher'));
+assert.ok(inScope('subjectivity://cv') && !inScope('subjectivity://cv/old'));
+assert.ok(inScope('output://talk') && !inScope('output://talk/slides'), '* stays in one segment');
+assert.ok(uriMatcher(['wiki://**'])('wiki://math/logic/turing-machines'));
 
 const bilingual = [
     '> [!i18n]',
