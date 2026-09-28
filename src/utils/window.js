@@ -42,7 +42,8 @@ function createWindow(sendToRenderer, geminiSessionRef) {
         { useSystemPicker: true }
     );
 
-    mainWindow.setContentProtection(true);
+    // No content protection: this is an assistive cue card, not something to hide, and a window
+    // that screenshots cannot see is also a window nobody can help debug.
     if (process.platform === 'win32') {
         mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
         mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
@@ -57,14 +58,10 @@ function createWindow(sendToRenderer, geminiSessionRef) {
         }
     }
 
-    // Hide from Mission Control on macOS
-    if (process.platform === 'darwin') {
-        try {
-            mainWindow.setHiddenInMissionControl(true);
-        } catch (error) {
-            console.warn('Could not hide from Mission Control:', error.message);
-        }
-    }
+    // The renderer's console (UI errors) lands in the app log next to the main process's.
+    mainWindow.webContents.on('console-message', (_event, level, message, line, source) => {
+        if (level >= 2) console.error(`[renderer] ${message} (${path.basename(source || '')}:${line})`);
+    });
 
     mainWindow.loadFile(path.join(__dirname, '../index.html'));
 
