@@ -7,7 +7,7 @@ const CONFIG_VERSION = 1;
 // Default values
 const DEFAULT_CONFIG = {
     configVersion: CONFIG_VERSION,
-    onboarded: false,
+    onboarded: true, // no intro pages: the app opens straight on the start screen
     layout: 'normal',
     geminiLiveModel: 'gemini-3.1-flash-live-preview',
     groqModel: 'qwen/qwen3.6-27b',
