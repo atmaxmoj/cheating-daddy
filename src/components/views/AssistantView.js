@@ -4,6 +4,17 @@ import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
 // Module-level so it survives the view being re-created when the user navigates away and back.
 const transcriptLines = [];
 
+// leadSplit — bold leading letters ("bionic reading"): the eye lands on the bold start of each
+// word and the rest follows. Returns [before, lead, rest]; leading punctuation stays unbolded and
+// words with no Latin letters (CJK, numbers) are left whole.
+function leadSplit(word) {
+    const m = /^([^A-Za-z]*)([A-Za-z][\w'’-]*)(.*)$/s.exec(word);
+    if (!m) return [word, '', ''];
+    const core = m[2];
+    const n = core.length <= 3 ? 1 : core.length === 4 ? 2 : core.length <= 7 ? 3 : core.length <= 10 ? 4 : Math.ceil(core.length * 0.4);
+    return [m[1], core.slice(0, n), core.slice(n) + m[3]];
+}
+
 function clock(at) {
     return new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
@@ -63,6 +74,13 @@ export class AssistantView extends LitElement {
         }
 
         .transcript-line:last-child {
+            color: var(--text-primary);
+        }
+
+        /* Bold leading letters: the lead carries the weight, the rest of the word stays light. */
+        .lead,
+        .response-container b.lead {
+            font-weight: 700;
             color: var(--text-primary);
         }
 
@@ -435,7 +453,15 @@ export class AssistantView extends LitElement {
                     if (word.trim()) {
                         const span = document.createElement('span');
                         span.setAttribute('data-word', '');
-                        span.textContent = word;
+                        const [before, lead, rest] = leadSplit(word);
+                        if (lead) {
+                            const b = document.createElement('b');
+                            b.className = 'lead';
+                            b.textContent = lead;
+                            span.append(before, b, rest);
+                        } else {
+                            span.textContent = word;
+                        }
                         frag.appendChild(span);
                     } else {
                         frag.appendChild(document.createTextNode(word));
@@ -549,7 +575,10 @@ export class AssistantView extends LitElement {
                           line => html`
                               <div class="transcript-line">
                                   <span class="transcript-meta">${clock(line.at)}${line.source === 'typed' ? ' · typed' : ''}</span>
-                                  ${line.text}
+                                  ${line.text.split(/(\s+)/).map(word => {
+                                      const [before, lead, rest] = leadSplit(word);
+                                      return lead ? html`${before}<b class="lead">${lead}</b>${rest}` : word;
+                                  })}
                               </div>
                           `,
                       )}
