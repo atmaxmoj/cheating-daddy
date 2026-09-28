@@ -3,7 +3,8 @@ const path = require('path');
 const { getSystemPrompt } = require('./prompts');
 const { sendToRenderer, initializeNewSession, saveConversationTurn } = require('./gemini');
 const { publishTranscript, publishCue, newCueID } = require('./relay');
-const { getCredentials } = require('../storage');
+const standmeet = require('./standmeet');
+const { getCredentials, getPreferences } = require('../storage');
 const {
     ensureNativeBinary,
     ensureLlamaModel,
@@ -22,6 +23,17 @@ let whisperProcess = null;
 let whisperBaseUrl = null;
 let localConversationHistory = [];
 let currentSystemPrompt = null;
+let currentProfile = null;
+let currentCustomPrompt = '';
+
+// systemPromptFor — the Cue Cards profile draws its context per question from the user's
+// StandMeet corpus (the notes that match what was just said); anything typed in AI Context rides
+// along. Every other profile keeps the fixed prompt built at session start.
+function systemPromptFor(query) {
+    if (currentProfile !== 'cues' || !standmeet.isLoaded()) return currentSystemPrompt;
+    const extra = currentCustomPrompt.trim() ? `\n\n## Also from the user\n${currentCustomPrompt.trim()}` : '';
+    return getSystemPrompt('cues', standmeet.contextFor(query) + extra, false);
+}
 let isLocalActive = false;
 let initializationController = null;
 let llamaCacheSnapshot = new Set();
@@ -286,7 +298,8 @@ async function sendToLlama(transcription) {
     }
 
     try {
-        const messages = [{ role: 'system', content: currentSystemPrompt || 'You are a helpful assistant.' }, ...localConversationHistory];
+        const system = systemPromptFor(transcription) || 'You are a helpful assistant.';
+        const messages = [{ role: 'system', content: system }, ...localConversationHistory];
 
         let isFirst = true;
         const cueID = newCueID();
@@ -482,18 +495,41 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
         initializationController = new AbortController();
         llamaCacheSnapshot = getDirectoryEntries(path.join(getModelsDirectory(), 'llama'));
         currentSystemPrompt = getSystemPrompt(profile, customPrompt, false);
+        currentProfile = profile;
+        currentCustomPrompt = customPrompt || '';
         llamaModel = model;
 
         const usesApi = isApiModel(model);
         if (usesApi && !getCredentials().deepseekApiKey) {
             throw new Error('Add your DeepSeek API key to use DeepSeek');
         }
+
+        // Cue Cards: read the corpus while Whisper downloads and starts (about 20 s for ~700 notes).
+        let corpusProgress = '';
+        const corpusLoad =
+            profile === 'cues'
+                ? standmeet
+                      .loadCorpus(getPreferences().standmeetHost || 'https://sijie.xyz', (done, total) => {
+                          corpusProgress = `${done}/${total}`;
+                      })
+                      .then(
+                          count => ({ count }),
+                          error => ({ error }),
+                      )
+                : Promise.resolve({ count: 0 });
+
         const nativeFiles = await prepareNativeFiles(model, whisperModel, initializationController.signal);
         validatePreparedNativeFiles(nativeFiles, usesApi);
 
         sendToRenderer('update-status', 'Starting Whisper...');
         sendDownloadProgress('Starting Whisper');
         await startWhisperServer(nativeFiles.whisperBinaryPath, nativeFiles.whisperModelPath);
+
+        const ticker = setInterval(() => sendToRenderer('update-status', `Reading your corpus... ${corpusProgress}`), 500);
+        const corpus = await corpusLoad.finally(() => clearInterval(ticker));
+        if (corpus.error) {
+            throw new Error(`Could not read your StandMeet corpus: ${corpus.error.message}`);
+        }
 
         if (!usesApi) {
             sendToRenderer('update-status', 'Loading local language model...');
@@ -513,7 +549,7 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
         initializationController = null;
         sendToRenderer('local-ai-download-progress', { active: false });
         sendToRenderer('session-initializing', false);
-        sendToRenderer('update-status', 'Local AI ready - Listening...');
+        sendToRenderer('update-status', corpus.count ? `Ready (${corpus.count} notes) - Listening...` : 'Local AI ready - Listening...');
         console.log('[LocalAI] Native session initialized successfully');
         return true;
     } catch (error) {

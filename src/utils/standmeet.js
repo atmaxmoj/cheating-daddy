@@ -1,0 +1,229 @@
+// standmeet.js — the user's own corpus as the cue context, instead of a pasted "context" box.
+//
+// At session start the app reads every wiki note from the user's StandMeet instance over the
+// owner MCP (the same Ed25519 Sigv1 credentials the StandMeet MCP client uses), keeps the English
+// text in memory and builds a small BM25 index. Per question, the top notes become the context of
+// that one request: retrieval is local and takes milliseconds, so the only network hop in the cue
+// loop is the model.
+//
+// Host: preference `standmeetHost` (default https://sijie.xyz).
+// Credentials: $STANDMEET_CREDS_PATH or ~/.standmeet/credentials.json ({keyId, privateKeyPem}).
+
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const PAGE = 200;
+const CONCURRENCY = 16;
+const NOTE_CHARS = 2000; // kept per note
+const CONTEXT_CHARS = 900; // per note in a prompt
+const TOP_K = 5;
+
+// ── owner MCP client ──
+
+function loadCreds() {
+    const file = process.env.STANDMEET_CREDS_PATH || path.join(os.homedir(), '.standmeet', 'credentials.json');
+    const creds = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!creds.keyId || !creds.privateKeyPem) throw new Error(`${file} is missing keyId or privateKeyPem`);
+    return { keyId: creds.keyId, key: crypto.createPrivateKey(creds.privateKeyPem) };
+}
+
+function authHeader(creds) {
+    const ts = Math.floor(Date.now() / 1000);
+    const nonce = crypto.randomUUID();
+    const challenge = Buffer.from(`standmeet-sigv1\n${creds.keyId}\n${ts}\n${nonce}`, 'utf8');
+    const sig = crypto.sign(null, challenge, creds.key).toString('base64');
+    return `Sigv1 keyId=${creds.keyId},ts=${ts},nonce=${nonce},sig=${sig}`;
+}
+
+function createClient(host) {
+    const creds = loadCreds();
+    let session = null;
+    let nextID = 1;
+
+    async function rpc(method, params, notify = false) {
+        const headers = { Authorization: authHeader(creds), 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+        if (session) headers['Mcp-Session-Id'] = session;
+        const body = { jsonrpc: '2.0', method, params, ...(notify ? {} : { id: nextID++ }) };
+        const res = await fetch(`${host}/mcp`, { method: 'POST', headers, body: JSON.stringify(body) });
+        session = res.headers.get('mcp-session-id') || session;
+        const text = (await res.text()).trim();
+        if (notify) return null;
+        if (!res.ok || !text) throw new Error(`StandMeet ${method}: HTTP ${res.status} ${text.slice(0, 200)}`);
+        const line = text.startsWith('{') ? text : text.split('\n').find(l => l.startsWith('data:')).slice(5);
+        const msg = JSON.parse(line);
+        if (msg.error) throw new Error(`StandMeet ${method}: ${msg.error.message}`);
+        return msg.result;
+    }
+
+    async function tool(name, args) {
+        const result = await rpc('tools/call', { name, arguments: args });
+        const text = result.content?.[0]?.text || '';
+        if (result.isError) throw new Error(`StandMeet ${name}: ${text.slice(0, 200)}`);
+        return JSON.parse(text);
+    }
+
+    return {
+        async connect() {
+            await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'cue-cards', version: '1' } });
+            await rpc('notifications/initialized', {}, true);
+        },
+        tool,
+    };
+}
+
+// ── note text ──
+
+// cleanBody — the English pane of a bilingual note as plain prose: callout quoting, HTML, code
+// and diagram blocks, and wiki-link brackets removed.
+function cleanBody(body) {
+    let text = body || '';
+    const en = text.indexOf('[!lang] en');
+    if (en >= 0) {
+        const rest = text.slice(en + '[!lang] en'.length);
+        const next = rest.indexOf('[!lang]');
+        text = next >= 0 ? rest.slice(0, next) : rest;
+    }
+    return text
+        .split('\n')
+        .map(l => l.replace(/^(\s*>\s?)+/, ''))
+        .join('\n')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
+        .replace(/\[\[([^\]]+)\]\]/g, '$1')
+        .replace(/^#+\s*/gm, '')
+        .replace(/\[!i18n\]|\[!lang\][^\n]*/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+        .slice(0, NOTE_CHARS);
+}
+
+// ── BM25 index ──
+
+const STOP = new Set(
+    'the a an and or of to in on for with is are was were be it this that as at by from you your how what why do does did can could would should i me my we our they their about have has had not but if so tell'.split(
+        ' ',
+    ),
+);
+
+// tokens — lowercase words, plus character bigrams for CJK runs (no spaces to split on).
+function tokens(text) {
+    const out = [];
+    for (const w of (text || '').toLowerCase().match(/[a-z0-9]+/g) || []) if (w.length > 1 && !STOP.has(w)) out.push(w);
+    for (const run of (text || '').match(/[一-鿿]+/g) || []) {
+        for (let i = 0; i < run.length - 1; i++) out.push(run.slice(i, i + 2));
+    }
+    return out;
+}
+
+function buildIndex(notes) {
+    const docs = notes.map(n => {
+        const words = [...tokens(n.title), ...tokens(n.title), ...tokens(n.title), ...tokens(n.path), ...tokens(n.text)];
+        const tf = new Map();
+        for (const w of words) tf.set(w, (tf.get(w) || 0) + 1);
+        return { note: n, tf, len: words.length };
+    });
+    const df = new Map();
+    for (const d of docs) for (const w of d.tf.keys()) df.set(w, (df.get(w) || 0) + 1);
+    const avg = docs.reduce((s, d) => s + d.len, 0) / Math.max(1, docs.length);
+    return { docs, df, avg, n: docs.length };
+}
+
+function search(index, query, k = TOP_K) {
+    const terms = [...new Set(tokens(query))];
+    const k1 = 1.2;
+    const b = 0.75;
+    return index.docs
+        .map(d => {
+            let score = 0;
+            for (const t of terms) {
+                const f = d.tf.get(t);
+                if (!f) continue;
+                const idf = Math.log(1 + (index.n - index.df.get(t) + 0.5) / (index.df.get(t) + 0.5));
+                score += (idf * f * (k1 + 1)) / (f + k1 * (1 - b + (b * d.len) / index.avg));
+            }
+            return { note: d.note, score };
+        })
+        .filter(r => r.score > 0)
+        .sort((x, y) => y.score - x.score)
+        .slice(0, k)
+        .map(r => r.note);
+}
+
+// ── corpus ──
+
+async function listAll(client, genre) {
+    const items = [];
+    let cursor;
+    do {
+        const page = await client.tool('corpus.list', { genre, limit: PAGE, ...(cursor ? { cursor } : {}) });
+        items.push(...page.items);
+        cursor = page.next_cursor;
+    } while (cursor);
+    return items;
+}
+
+async function mapLimit(items, limit, fn) {
+    const out = new Array(items.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) {
+            const i = next++;
+            out[i] = await fn(items[i], i);
+        }
+    });
+    await Promise.all(workers);
+    return out;
+}
+
+let index = null;
+let projects = ''; // the user's project overviews, sent with every question
+
+const PROJECT_ROOT = /^software\/project\/[^/]+$/;
+const PROJECT_CHARS = 400;
+
+// projectOverview — "tell me about yourself" shares no words with the notes that answer it; the
+// project root notes do, so they ride along with every question.
+function projectOverview(notes) {
+    return notes
+        .filter(n => PROJECT_ROOT.test(n.path) && n.text)
+        .map(n => `- ${n.title}: ${n.text.replace(/\s+/g, ' ').slice(0, PROJECT_CHARS)}`)
+        .join('\n');
+}
+
+// loadCorpus — reads every wiki note and builds the index. onProgress(done, total) for the status
+// line. Resolves with the note count.
+async function loadCorpus(host, onProgress = () => {}) {
+    const client = createClient(host.replace(/\/$/, ''));
+    await client.connect();
+    const listed = await listAll(client, 'wiki');
+    let done = 0;
+    const notes = await mapLimit(listed, CONCURRENCY, async item => {
+        const full = await client.tool('corpus.get', { genre: 'wiki', id: item.id }).catch(() => null);
+        onProgress(++done, listed.length);
+        return { title: item.title, path: item.path || '', text: cleanBody(full ? full.body : item.preview) };
+    });
+    const usable = notes.filter(n => n.text || n.title);
+    projects = projectOverview(usable);
+    index = buildIndex(usable);
+    return index.n;
+}
+
+// contextFor — the user's projects, then the notes most relevant to what was just said, as prompt
+// text ('' before loading).
+function contextFor(query) {
+    if (!index) return '';
+    const notes = search(index, query)
+        .map(n => `## ${n.title} (${n.path})\n${n.text.slice(0, CONTEXT_CHARS)}`)
+        .join('\n\n');
+    return `# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
+}
+
+function isLoaded() {
+    return index !== null;
+}
+
+module.exports = { loadCorpus, contextFor, isLoaded, cleanBody, buildIndex, search };
