@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="robots" content="noindex">
+<title>Cue Cards</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --ink: #e9e6df; --muted: #8b8f98; --faint: #4a4f59;
+    --accent: #f0b35a; --ok: #6cc28a; --bad: #e0685c;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  body { padding: env(safe-area-inset-top) 18px env(safe-area-inset-bottom); display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 8px;
+    font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); display: inline-block; margin-right: 8px; }
+  .dot.live { background: var(--ok); box-shadow: 0 0 0 4px rgba(108,194,138,.15); }
+  .dot.off { background: var(--bad); }
+  #heard { color: var(--muted); font-size: 15px; min-height: 1.4em; margin: 10px 0 14px;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  #heard::before { content: "heard · "; color: var(--faint); text-transform: uppercase; font-size: 11px; letter-spacing: .12em; }
+  #cue { font-size: 27px; line-height: 1.3; font-weight: 600; }
+  #cue ul { margin: 0; padding-left: 1.05em; display: grid; gap: .45em; }
+  #cue li::marker { color: var(--accent); }
+  #cue strong { color: var(--accent); }
+  #cue .idle { color: var(--faint); font-weight: 400; font-size: 20px; }
+  #cue.stale { opacity: .45; }
+  #history { margin-top: auto; padding: 18px 0 16px; border-top: 1px solid var(--panel); color: var(--muted);
+    font-size: 14px; display: grid; gap: 10px; max-height: 32vh; overflow-y: auto; }
+  #history div { white-space: pre-wrap; }
+  form { margin: auto 0; display: grid; gap: 12px; }
+  input { font: inherit; padding: 14px; border-radius: 10px; border: 1px solid var(--faint); background: var(--panel); color: var(--ink); }
+  button { font: inherit; font-weight: 600; padding: 14px; border: 0; border-radius: 10px; background: var(--accent); color: #1b1408; }
+  #err { color: var(--bad); font-size: 14px; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<header><span><span id="dot" class="dot"></span><span id="state">connecting</span></span><span>cue cards</span></header>
+
+<form id="login" hidden>
+  <label for="token">Relay token</label>
+  <input id="token" type="password" autocomplete="current-password" placeholder="the CUE_TOKEN you set">
+  <button type="submit">Open</button>
+  <div id="err"></div>
+</form>
+
+<main id="live" hidden>
+  <div id="heard"></div>
+  <div id="cue"><span class="idle">Waiting for the next question…</span></div>
+</main>
+<section id="history" hidden></section>
+
+<script>
+  const BASE = '__BASE__';
+  const $ = id => document.getElementById(id);
+  let source = null;
+  let latestCueID = '';
+  const past = [];
+
+  function setState(kind, text) {
+    $('dot').className = 'dot ' + kind;
+    $('state').textContent = text;
+  }
+
+  // render — the model writes "- " bullets with **bold**; nothing else is trusted as markup.
+  function render(text) {
+    const escape = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const inline = s => escape(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const bullets = lines.filter(l => /^[-*•]\s+/.test(l));
+    if (bullets.length === 0) return `<p>${inline(text.trim())}</p>`;
+    return '<ul>' + bullets.map(l => `<li>${inline(l.replace(/^[-*•]\s+/, ''))}</li>`).join('') + '</ul>';
+  }
+
+  function show(event) {
+    if (event.kind === 'transcript') {
+      $('heard').textContent = event.text;
+      $('cue').classList.add('stale');
+      return;
+    }
+    if (event.kind === 'status') return;
+    if (event.text.trim() === '—') return; // the model's "nothing to cue"
+    if (latestCueID && event.id !== latestCueID) remember($('cue').dataset.text || '');
+    latestCueID = event.id;
+    $('cue').dataset.text = event.text;
+    $('cue').innerHTML = render(event.text);
+    $('cue').classList.toggle('stale', false);
+  }
+
+  function remember(text) {
+    if (!text) return;
+    past.unshift(text);
+    past.length = Math.min(past.length, 8);
+    $('history').hidden = false;
+    $('history').innerHTML = past.map(t => `<div>${t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</div>`).join('');
+  }
+
+  function connect() {
+    source?.close();
+    setState('', 'connecting');
+    source = new EventSource(BASE + '/api/stream');
+    source.onopen = () => setState('live', 'live');
+    source.onmessage = message => {
+      const event = JSON.parse(message.data);
+      if (event.kind === 'hello') {
+        $('login').hidden = true;
+        $('live').hidden = false;
+        event.backlog.forEach(show);
+        return;
+      }
+      show(event);
+    };
+    source.onerror = async () => {
+      setState('off', 'reconnecting');
+      const probe = await fetch(BASE + '/api/stream', { method: 'GET' }).catch(() => null);
+      if (probe && probe.status === 401) {
+        source.close();
+        $('live').hidden = true;
+        $('login').hidden = false;
+        setState('off', 'locked');
+      } else {
+        probe?.body?.cancel();
+      }
+    };
+  }
+
+  $('login').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('err').textContent = '';
+    const res = await fetch(BASE + '/api/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: $('token').value }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      $('err').textContent = res && res.status === 401 ? 'That token is not right.' : 'Could not reach the relay.';
+      return;
+    }
+    connect();
+  });
+
+  connect();
+</script>
+</body>
+</html>

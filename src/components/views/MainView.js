@@ -1,6 +1,8 @@
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
 
 const LOCAL_LLM_PRESETS = [
+    { value: 'claude:claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 — Anthropic API · Fastest, no download' },
+    { value: 'claude:claude-sonnet-5', label: 'Claude Sonnet 5 — Anthropic API · Smarter' },
     { value: 'unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M', label: 'Qwen 3.5 0.8B Q4 — 0.74 GB · Fastest' },
     { value: 'unsloth/Qwen3.5-0.8B-GGUF:Q8_0', label: 'Qwen 3.5 0.8B Q8 — 1.02 GB' },
     { value: 'unsloth/Qwen3.5-2B-GGUF:Q4_K_M', label: 'Qwen 3.5 2B Q4 — 1.95 GB' },
@@ -698,6 +700,9 @@ export class MainView extends LitElement {
         _geminiKey: { state: true },
         _groqKey: { state: true },
         _openaiKey: { state: true },
+        _anthropicKey: { state: true },
+        _relayUrl: { state: true },
+        _relayToken: { state: true },
         _geminiLiveModel: { state: true },
         _groqModel: { state: true },
         _groqImageModel: { state: true },
@@ -722,11 +727,14 @@ export class MainView extends LitElement {
         this.downloadProgress = { active: false, label: '', percentage: null };
         this.onCancelDownload = () => {};
 
-        this._mode = 'byok';
+        this._mode = 'local';
         this._token = '';
         this._geminiKey = '';
         this._groqKey = '';
         this._openaiKey = '';
+        this._anthropicKey = '';
+        this._relayUrl = '';
+        this._relayToken = '';
         this._geminiLiveModel = 'gemini-3.1-flash-live-preview';
         this._groqModel = 'qwen/qwen3.6-27b';
         this._groqImageModel = 'qwen/qwen3.6-27b';
@@ -734,9 +742,9 @@ export class MainView extends LitElement {
         this._tokenError = false;
         this._keyError = false;
         this._showLocalHelp = false;
-        this._localLlmModel = 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M';
+        this._localLlmModel = 'claude:claude-haiku-4-5-20251001';
         this._useCustomLocalLlmModel = false;
-        this._whisperModel = 'tiny.en';
+        this._whisperModel = 'base.en';
 
         this._animId = null;
         this._time = 0;
@@ -755,7 +763,7 @@ export class MainView extends LitElement {
                 cheatingDaddy.storage.getCredentials().catch(() => ({})),
             ]);
 
-            const storedMode = prefs.providerMode || 'byok';
+            const storedMode = prefs.providerMode || 'local';
             this._mode = storedMode === 'cloud' ? 'byok' : storedMode;
 
             if (storedMode === 'cloud') {
@@ -767,15 +775,18 @@ export class MainView extends LitElement {
             this._geminiKey = (await cheatingDaddy.storage.getApiKey().catch(() => '')) || '';
             this._groqKey = (await cheatingDaddy.storage.getGroqApiKey().catch(() => '')) || '';
             this._openaiKey = creds.openaiKey || '';
+            this._anthropicKey = creds.anthropicApiKey || '';
+            this._relayToken = creds.relayToken || '';
+            this._relayUrl = prefs.relayUrl || '';
             this._geminiLiveModel = config.geminiLiveModel || 'gemini-3.1-flash-live-preview';
             this._groqModel = config.groqModel || 'qwen/qwen3.6-27b';
             this._groqImageModel = config.groqImageModel || 'qwen/qwen3.6-27b';
             this._disableGroqThinking = config.disableGroqThinking === true;
 
             // Load local AI settings
-            this._localLlmModel = prefs.localLlmModel || 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M';
+            this._localLlmModel = prefs.localLlmModel || 'claude:claude-haiku-4-5-20251001';
             this._useCustomLocalLlmModel = !LOCAL_LLM_PRESETS.some(preset => preset.value === this._localLlmModel);
-            this._whisperModel = prefs.whisperModel || 'tiny.en';
+            this._whisperModel = prefs.whisperModel || 'base.en';
 
             this.requestUpdate();
         } catch (e) {
@@ -939,6 +950,25 @@ export class MainView extends LitElement {
         this.requestUpdate();
     }
 
+    async _saveAnthropicKey(val) {
+        this._anthropicKey = val;
+        this._keyError = false;
+        await cheatingDaddy.storage.setCredentials({ anthropicApiKey: val });
+        this.requestUpdate();
+    }
+
+    async _saveRelayUrl(val) {
+        this._relayUrl = val;
+        await cheatingDaddy.storage.updatePreference('relayUrl', val.trim());
+        this.requestUpdate();
+    }
+
+    async _saveRelayToken(val) {
+        this._relayToken = val;
+        await cheatingDaddy.storage.setCredentials({ relayToken: val });
+        this.requestUpdate();
+    }
+
     async _saveGroqKey(val) {
         this._groqKey = val;
         await cheatingDaddy.storage.setGroqApiKey(val);
@@ -1030,6 +1060,11 @@ export class MainView extends LitElement {
             }
         } else if (this._mode === 'local') {
             if (!this._localLlmModel.trim()) {
+                return;
+            }
+            if (this._localLlmModel.startsWith('claude:') && !this._anthropicKey.trim()) {
+                this._keyError = true;
+                this.requestUpdate();
                 return;
             }
         }
@@ -1278,6 +1313,54 @@ export class MainView extends LitElement {
                                 : ''
                         }
                         <div class="form-hint">Sizes include the vision model. Q4 uses less memory; Q8 preserves more quality.</div>
+                    </div>
+                    ${
+                        this._localLlmModel.startsWith('claude:')
+                            ? html`
+                                  <div class="form-group">
+                                      <label class="form-label">Anthropic API key</label>
+                                      <input
+                                          type="password"
+                                          placeholder="sk-ant-…"
+                                          .value=${this._anthropicKey}
+                                          @input=${e => this._saveAnthropicKey(e.target.value)}
+                                          class=${this._keyError ? 'error' : ''}
+                                      />
+                                      <div class="form-hint">Speech is transcribed on this Mac by Whisper; only the text goes to Claude.</div>
+                                  </div>
+                              `
+                            : ''
+                    }
+                </div>
+            </details>
+
+            <details class="config-section">
+                <summary class="config-summary">
+                    <span class="config-summary-text">
+                        <span class="config-summary-title">Phone view</span>
+                        <span class="config-summary-description">Mirror cues to a relay you host</span>
+                    </span>
+                    ${this._renderConfigChevron()}
+                </summary>
+                <div class="config-content">
+                    <div class="form-group">
+                        <label class="form-label">Relay URL</label>
+                        <input
+                            type="text"
+                            placeholder="https://sijie.xyz/cheating-daddy"
+                            .value=${this._relayUrl}
+                            @input=${e => this._saveRelayUrl(e.target.value)}
+                        />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Relay token</label>
+                        <input
+                            type="password"
+                            placeholder="CUE_TOKEN"
+                            .value=${this._relayToken}
+                            @input=${e => this._saveRelayToken(e.target.value)}
+                        />
+                        <div class="form-hint">Open the relay URL on your phone and log in with the same token. Leave empty to keep cues on this Mac only.</div>
                     </div>
                 </div>
             </details>

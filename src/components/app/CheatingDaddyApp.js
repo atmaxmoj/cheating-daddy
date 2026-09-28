@@ -934,6 +934,7 @@ export class CheatingDaddyApp extends LitElement {
         if (!this._isLiveMode()) return '';
 
         const profileLabels = {
+            cues: 'Cues',
             interview: 'Interview',
             sales: 'Sales Call',
             meeting: 'Meeting',

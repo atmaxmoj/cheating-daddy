@@ -332,6 +332,7 @@ export class HistoryView extends LitElement {
 
     getProfileNames() {
         return {
+            cues: 'Cue Cards',
             interview: 'Job Interview',
             sales: 'Sales Call',
             meeting: 'Business Meeting',

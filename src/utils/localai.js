@@ -2,6 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { getSystemPrompt } = require('./prompts');
 const { sendToRenderer, initializeNewSession, saveConversationTurn } = require('./gemini');
+const { requestClaude } = require('./claude');
+const { publishTranscript, publishCue, newCueID } = require('./relay');
+const { getCredentials } = require('../storage');
 const {
     ensureNativeBinary,
     ensureLlamaModel,
@@ -37,6 +40,14 @@ const VAD_MODES = {
 };
 
 let vadConfig = VAD_MODES.VERY_AGGRESSIVE;
+
+// A model id "claude:<model>" keeps local Whisper for transcription and sends replies to the
+// Anthropic API: no llama runner, no model download.
+const CLAUDE_PREFIX = 'claude:';
+
+function isClaudeModel(model) {
+    return typeof model === 'string' && model.startsWith(CLAUDE_PREFIX);
+}
 let resampleRemainder = Buffer.alloc(0);
 
 function resample24kTo16k(inputBuffer) {
@@ -176,6 +187,7 @@ async function handleSpeechEnd(audioData) {
         }
 
         sendToRenderer('update-status', 'Generating response...');
+        publishTranscript(transcription);
         await sendToLlama(transcription);
     } catch (error) {
         console.error('[LocalAI] Transcription error:', error);
@@ -212,6 +224,10 @@ async function readStreamingResponse(response, onText) {
 }
 
 async function requestLlama(messages, onText) {
+    if (isClaudeModel(llamaModel)) {
+        const apiKey = getCredentials().anthropicApiKey;
+        return requestClaude({ apiKey, model: llamaModel.slice(CLAUDE_PREFIX.length), messages }, onText);
+    }
     if (!llamaBaseUrl) {
         throw new Error('Llama server is not running');
     }
@@ -252,12 +268,15 @@ async function sendToLlama(transcription) {
         const messages = [{ role: 'system', content: currentSystemPrompt || 'You are a helpful assistant.' }, ...localConversationHistory];
 
         let isFirst = true;
+        const cueID = newCueID();
         const fullText = await requestLlama(messages, text => {
             sendToRenderer(isFirst ? 'new-response' : 'update-response', text);
+            publishCue(cueID, text, false);
             isFirst = false;
         });
 
         if (fullText.trim()) {
+            publishCue(cueID, fullText, true);
             localConversationHistory.push({
                 role: 'assistant',
                 content: fullText.trim(),
@@ -329,9 +348,13 @@ async function prepareNativeFiles(llamaModelReference, whisperModel, signal) {
         sendToRenderer('update-status', formatDownloadStatus(label, progress));
         sendDownloadProgress(label, progress);
     };
+    const usesClaude = isClaudeModel(llamaModelReference);
 
-    sendDownloadProgress('Checking Llama runner');
-    const llamaBinaryPath = await ensureNativeBinary('llama', binaryProgress('Llama runner'), signal);
+    let llamaBinaryPath = null;
+    if (!usesClaude) {
+        sendDownloadProgress('Checking Llama runner');
+        llamaBinaryPath = await ensureNativeBinary('llama', binaryProgress('Llama runner'), signal);
+    }
 
     sendDownloadProgress('Checking Whisper runner');
     const whisperBinaryPath = await ensureNativeBinary('whisper', binaryProgress('Whisper runner'), signal);
@@ -345,6 +368,10 @@ async function prepareNativeFiles(llamaModelReference, whisperModel, signal) {
         sendToRenderer('whisper-downloading', false);
     }
 
+    if (usesClaude) {
+        return { whisperBinaryPath, whisperModelPath };
+    }
+
     sendDownloadProgress('Checking language model');
     const llamaFiles = await ensureLlamaModel(llamaModelReference, binaryProgress('Language model'), binaryProgress('Vision model'), signal);
     return {
@@ -356,14 +383,17 @@ async function prepareNativeFiles(llamaModelReference, whisperModel, signal) {
     };
 }
 
-function validatePreparedNativeFiles(nativeFiles) {
-    const requiredFiles = [
-        ['Llama runner', nativeFiles.llamaBinaryPath],
+function validatePreparedNativeFiles(nativeFiles, usesClaude) {
+    const whisperFiles = [
         ['Whisper runner', nativeFiles.whisperBinaryPath],
         ['Whisper model', nativeFiles.whisperModelPath],
+    ];
+    const llamaFiles = [
+        ['Llama runner', nativeFiles.llamaBinaryPath],
         ['Language model', nativeFiles.llamaModelPath],
         ['Vision model', nativeFiles.projectorPath],
     ];
+    const requiredFiles = usesClaude ? whisperFiles : [...whisperFiles, ...llamaFiles];
 
     for (const [label, filePath] of requiredFiles) {
         if (!filePath || !fs.existsSync(filePath)) {
@@ -433,16 +463,22 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
         currentSystemPrompt = getSystemPrompt(profile, customPrompt, false);
         llamaModel = model;
 
+        const usesClaude = isClaudeModel(model);
+        if (usesClaude && !getCredentials().anthropicApiKey) {
+            throw new Error('Add your Anthropic API key to use Claude');
+        }
         const nativeFiles = await prepareNativeFiles(model, whisperModel, initializationController.signal);
-        validatePreparedNativeFiles(nativeFiles);
+        validatePreparedNativeFiles(nativeFiles, usesClaude);
 
         sendToRenderer('update-status', 'Starting Whisper...');
         sendDownloadProgress('Starting Whisper');
         await startWhisperServer(nativeFiles.whisperBinaryPath, nativeFiles.whisperModelPath);
 
-        sendToRenderer('update-status', 'Loading local language model...');
-        sendDownloadProgress('Loading language model');
-        await startLlamaServer(nativeFiles.llamaBinaryPath, nativeFiles.llamaModelPath, nativeFiles.projectorPath);
+        if (!usesClaude) {
+            sendToRenderer('update-status', 'Loading local language model...');
+            sendDownloadProgress('Loading language model');
+            await startLlamaServer(nativeFiles.llamaBinaryPath, nativeFiles.llamaModelPath, nativeFiles.projectorPath);
+        }
 
         isSpeaking = false;
         speechBuffers = [];
@@ -526,7 +562,7 @@ function isLocalSessionActive() {
 }
 
 async function sendLocalText(text) {
-    if (!isLocalActive || !llamaProcess) {
+    if (!isLocalActive) {
         return { success: false, error: 'No active local session' };
     }
 
@@ -539,7 +575,7 @@ async function sendLocalText(text) {
 }
 
 async function sendLocalImage(base64Data, prompt) {
-    if (!isLocalActive || !llamaProcess) {
+    if (!isLocalActive) {
         return { success: false, error: 'No active local session' };
     }
 

@@ -18,12 +18,13 @@ const DEFAULT_CONFIG = {
 const DEFAULT_CREDENTIALS = {
     apiKey: '',
     groqApiKey: '',
+    anthropicApiKey: '',
 };
 
 const DEFAULT_PREFERENCES = {
     customPrompt: '',
-    providerMode: 'byok',
-    selectedProfile: 'interview',
+    providerMode: 'local',
+    selectedProfile: 'cues',
     selectedLanguage: 'en-US',
     selectedScreenshotInterval: '5',
     selectedImageQuality: 'medium',
@@ -32,8 +33,8 @@ const DEFAULT_PREFERENCES = {
     fontSize: 'medium',
     backgroundTransparency: 0.8,
     googleSearchEnabled: false,
-    localLlmModel: 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M',
-    whisperModel: 'tiny.en',
+    localLlmModel: 'claude:claude-haiku-4-5-20251001',
+    whisperModel: 'base.en',
 };
 
 const DEFAULT_KEYBINDS = null; // null means use system defaults

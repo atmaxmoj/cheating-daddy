@@ -245,6 +245,7 @@ export class CustomizeView extends LitElement {
 
     getProfiles() {
         return [
+            { value: 'cues', name: 'Cue Cards' },
             { value: 'interview', name: 'Job Interview' },
             { value: 'sales', name: 'Sales Call' },
             { value: 'meeting', name: 'Business Meeting' },
