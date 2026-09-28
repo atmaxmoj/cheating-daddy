@@ -24,8 +24,12 @@
   #heard { color: var(--muted); font-size: 15px; min-height: 1.4em; margin: 10px 0 14px;
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   #heard::before { content: "heard · "; color: var(--faint); text-transform: uppercase; font-size: 11px; letter-spacing: .12em; }
-  #cue { font-size: 27px; line-height: 1.3; font-weight: 600; }
-  #cue ul { margin: 0; padding-left: 1.05em; display: grid; gap: .45em; }
+  #cue { font-size: 18px; line-height: 1.45; }
+  #cue p { margin: 0 0 .6em; }
+  #cue p:first-child { font-size: 22px; font-weight: 600; line-height: 1.3; }
+  #cue p.from { color: var(--muted); font-size: 13px; }
+  #cue code { font-size: .9em; color: var(--accent); }
+  #cue ul { margin: 0 0 .7em; padding-left: 1.05em; display: grid; gap: .5em; }
   #cue li::marker { color: var(--accent); }
   #cue strong { color: var(--accent); }
   #cue .idle { color: var(--faint); font-weight: 400; font-size: 20px; }
@@ -67,14 +71,24 @@
     $('state').textContent = text;
   }
 
-  // render — the model writes "- " bullets with **bold**; nothing else is trusted as markup.
+  // render — the cue is a bold answer line, "- " points, an **Example:** line and a _From:_ line;
+  // only **bold**, _italic_ and `code` are trusted as markup.
   function render(text) {
     const escape = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const inline = s => escape(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-    const bullets = lines.filter(l => /^[-*•]\s+/.test(l));
-    if (bullets.length === 0) return `<p>${inline(text.trim())}</p>`;
-    return '<ul>' + bullets.map(l => `<li>${inline(l.replace(/^[-*•]\s+/, ''))}</li>`).join('') + '</ul>';
+    const inline = s => escape(s)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|\s)_(.+?)_(?=\s|$)/g, '$1<em>$2</em>')
+      .replace(/`(.+?)`/g, '<code>$1</code>');
+    const out = [];
+    let list = [];
+    const flush = () => { if (list.length) out.push('<ul>' + list.join('') + '</ul>'); list = []; };
+    for (const line of text.split('\n').map(l => l.trim()).filter(Boolean)) {
+      if (/^[-*•]\s+/.test(line)) { list.push(`<li>${inline(line.replace(/^[-*•]\s+/, ''))}</li>`); continue; }
+      flush();
+      out.push(`<p class="${line.startsWith('_From') ? 'from' : ''}">${inline(line)}</p>`);
+    }
+    flush();
+    return out.join('');
   }
 
   function show(event) {

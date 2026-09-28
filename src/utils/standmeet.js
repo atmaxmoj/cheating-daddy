@@ -16,9 +16,9 @@ const path = require('path');
 
 const PAGE = 200;
 const CONCURRENCY = 16;
-const NOTE_CHARS = 2000; // kept per note
-const CONTEXT_CHARS = 900; // per note in a prompt
-const TOP_K = 5;
+const NOTE_CHARS = 4000; // kept per note (and searched)
+const CONTEXT_CHARS = 2000; // per note in a prompt: enough for the details and examples a cue needs
+const TOP_K = 6;
 
 // ── owner MCP client ──
 

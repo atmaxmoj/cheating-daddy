@@ -73,7 +73,7 @@ async function requestDeepSeek(messages, onText) {
             model: llamaModel.slice(API_PREFIX.length),
             messages,
             stream: true,
-            max_tokens: 512,
+            max_tokens: 800,
             thinking: { type: 'disabled' },
         }),
     });
@@ -239,6 +239,7 @@ async function handleSpeechEnd(audioData) {
         }
 
         sendToRenderer('update-status', 'Generating response...');
+        sendToRenderer('transcript-line', { text: transcription, source: 'heard', at: Date.now() });
         publishTranscript(transcription);
         await sendToLlama(transcription);
     } catch (error) {
@@ -642,6 +643,7 @@ async function sendLocalText(text) {
     }
 
     try {
+        sendToRenderer('transcript-line', { text, source: 'typed', at: Date.now() });
         await sendToLlama(text);
         return { success: true };
     } catch (error) {

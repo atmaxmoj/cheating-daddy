@@ -1,11 +1,76 @@
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
 
+// transcriptLines — what the assistant heard (and what the user typed) this session, oldest first.
+// Module-level so it survives the view being re-created when the user navigates away and back.
+const transcriptLines = [];
+
+function clock(at) {
+    return new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 export class AssistantView extends LitElement {
     static styles = css`
         :host {
             height: 100%;
             display: flex;
             flex-direction: column;
+        }
+
+        /* ── Cue + transcript side by side ── */
+
+        .main {
+            flex: 1;
+            display: flex;
+            min-height: 0;
+        }
+
+        .main .response-container {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .transcript {
+            width: 32%;
+            min-width: 180px;
+            max-width: 340px;
+            border-left: 1px solid var(--border-subtle, var(--border));
+            background: var(--bg-app);
+            overflow-y: auto;
+            padding: var(--space-sm) var(--space-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+            user-select: text;
+        }
+
+        .transcript-title {
+            font-size: 11px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .transcript-empty {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .transcript-line {
+            font-size: 13px;
+            line-height: 1.45;
+            color: var(--text-secondary);
+            cursor: text;
+        }
+
+        .transcript-line:last-child {
+            color: var(--text-primary);
+        }
+
+        .transcript-meta {
+            display: block;
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            color: var(--text-muted);
         }
 
         * {
@@ -435,7 +500,18 @@ export class AssistantView extends LitElement {
             this.handleNextResponse = () => this.navigateToNextResponse();
             this.handleScrollUp = () => this.scrollResponseUp();
             this.handleScrollDown = () => this.scrollResponseDown();
+            this.handleTranscriptLine = (_event, line) => {
+                transcriptLines.push(line);
+                this.requestUpdate();
+                this.updateComplete.then(() => this.scrollTranscriptToBottom());
+            };
+            this.handleSessionInitializing = (_event, initializing) => {
+                if (initializing) transcriptLines.length = 0;
+                this.requestUpdate();
+            };
 
+            ipcRenderer.on('transcript-line', this.handleTranscriptLine);
+            ipcRenderer.on('session-initializing', this.handleSessionInitializing);
             ipcRenderer.on('navigate-previous-response', this.handlePreviousResponse);
             ipcRenderer.on('navigate-next-response', this.handleNextResponse);
             ipcRenderer.on('scroll-response-up', this.handleScrollUp);
@@ -453,7 +529,32 @@ export class AssistantView extends LitElement {
             if (this.handleNextResponse) ipcRenderer.removeListener('navigate-next-response', this.handleNextResponse);
             if (this.handleScrollUp) ipcRenderer.removeListener('scroll-response-up', this.handleScrollUp);
             if (this.handleScrollDown) ipcRenderer.removeListener('scroll-response-down', this.handleScrollDown);
+            if (this.handleTranscriptLine) ipcRenderer.removeListener('transcript-line', this.handleTranscriptLine);
+            if (this.handleSessionInitializing) ipcRenderer.removeListener('session-initializing', this.handleSessionInitializing);
         }
+    }
+
+    scrollTranscriptToBottom() {
+        const panel = this.shadowRoot.querySelector('.transcript');
+        if (panel) panel.scrollTop = panel.scrollHeight;
+    }
+
+    renderTranscript() {
+        return html`
+            <aside class="transcript" aria-label="Transcript">
+                <div class="transcript-title">Transcript</div>
+                ${transcriptLines.length === 0
+                    ? html`<div class="transcript-empty">What the other side says appears here.</div>`
+                    : transcriptLines.map(
+                          line => html`
+                              <div class="transcript-line">
+                                  <span class="transcript-meta">${clock(line.at)}${line.source === 'typed' ? ' · typed' : ''}</span>
+                                  ${line.text}
+                              </div>
+                          `,
+                      )}
+            </aside>
+        `;
     }
 
     async handleSendText() {
@@ -669,7 +770,10 @@ export class AssistantView extends LitElement {
         const hasMultipleResponses = this.responses.length > 1;
 
         return html`
-            <div class="response-container" id="responseContainer"></div>
+            <div class="main">
+                <div class="response-container" id="responseContainer"></div>
+                ${this.renderTranscript()}
+            </div>
 
             ${hasMultipleResponses ? html`
                 <div class="response-nav">
