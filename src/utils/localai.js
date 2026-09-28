@@ -120,8 +120,23 @@ function calculateRms(pcm16Buffer) {
     return Math.sqrt(sumSquares / samples);
 }
 
+// Audio level, logged every 5 s: "is sound reaching the assistant at all" is the first question
+// when no cue appears, and the answer should not need a debugger.
+let levelPeak = 0;
+let levelLoggedAt = 0;
+
+function logLevel(rms) {
+    levelPeak = Math.max(levelPeak, rms);
+    const now = Date.now();
+    if (now - levelLoggedAt < 5000) return;
+    console.log(`[LocalAI] audio level peak ${levelPeak.toFixed(4)} (speech threshold ${vadConfig.energyThreshold})`);
+    levelPeak = 0;
+    levelLoggedAt = now;
+}
+
 function processVad(pcm16kBuffer) {
     const rms = calculateRms(pcm16kBuffer);
+    logLevel(rms);
     const isVoice = rms > vadConfig.energyThreshold;
 
     if (isVoice) {
