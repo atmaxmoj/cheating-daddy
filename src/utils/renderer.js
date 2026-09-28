@@ -791,6 +791,35 @@ const cheatingDaddyApp = document.querySelector('cheating-daddy-app');
 // ============ THEME SYSTEM ============
 const theme = {
     themes: {
+        // paper / ink —— the StandMeet palette (cream paper + ink + vermillion), light and dark.
+        paper: {
+            background: '#F3EFE6',
+            text: '#1B1814',
+            textSecondary: '#5A5249',
+            textMuted: '#7A7167',
+            border: '#DCD3BF',
+            accent: '#B5391C',
+            btnPrimaryBg: '#B5391C',
+            btnPrimaryText: '#F3EFE6',
+            btnPrimaryHover: '#9A2F16',
+            tooltipBg: '#1B1814',
+            tooltipText: '#F3EFE6',
+            keyBg: 'rgba(27,24,20,0.08)',
+        },
+        ink: {
+            background: '#14110D',
+            text: '#E8E2D5',
+            textSecondary: '#B3AB9C',
+            textMuted: '#837C6F',
+            border: '#2A251D',
+            accent: '#D14E2E',
+            btnPrimaryBg: '#D14E2E',
+            btnPrimaryText: '#14110D',
+            btnPrimaryHover: '#E97A52',
+            tooltipBg: '#221C15',
+            tooltipText: '#E8E2D5',
+            keyBg: 'rgba(232,226,213,0.1)',
+        },
         dark: {
             background: '#101010',
             text: '#e0e0e0',
@@ -919,14 +948,16 @@ const theme = {
         },
     },
 
-    current: 'dark',
+    current: 'paper',
 
     get(name) {
-        return this.themes[name] || this.themes.dark;
+        return this.themes[name] || this.themes.paper;
     },
 
     getAll() {
         const names = {
+            paper: 'StandMeet Paper',
+            ink: 'StandMeet Ink',
             dark: 'Dark',
             light: 'Light',
             midnight: 'Midnight Blue',
@@ -1050,13 +1081,13 @@ const theme = {
     async load() {
         try {
             const prefs = await storage.getPreferences();
-            const themeName = prefs.theme || 'dark';
+            const themeName = prefs.theme || 'paper';
             const alpha = prefs.backgroundTransparency ?? 0.8;
             this.apply(themeName, alpha);
             return themeName;
         } catch (err) {
-            this.apply('dark');
-            return 'dark';
+            this.apply('paper');
+            return 'paper';
         }
     },
 

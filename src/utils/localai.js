@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { getSystemPrompt } = require('./prompts');
 const { sendToRenderer, initializeNewSession, saveConversationTurn } = require('./gemini');
-const { publishTranscript, publishCue, newCueID } = require('./relay');
+const { publishTranscript, publishCue, newCueID } = require('./feed');
 const standmeet = require('./standmeet');
 const { getCredentials, getPreferences } = require('../storage');
 const {
@@ -42,6 +42,11 @@ let isSpeaking = false;
 let speechBuffers = [];
 let silenceFrameCount = 0;
 let speechFrameCount = 0;
+let voicedFrameCount = 0; // loud frames in the current turn (the buffer also holds its silences)
+const MIN_VOICED_FRAMES = 5; // ~0.5 s of actual speech before a turn is worth transcribing
+
+// Whisper writes these for audio without words ("[BLANK_AUDIO]", "(coughs)", "[Music]").
+const NON_SPEECH = /^[\s[(*].*[\])*]\s*$/;
 
 const VAD_MODES = {
     NORMAL: { energyThreshold: 0.01, speechFramesRequired: 3, silenceFramesRequired: 30 },
@@ -142,10 +147,12 @@ function processVad(pcm16kBuffer) {
     if (isVoice) {
         speechFrameCount += 1;
         silenceFrameCount = 0;
+        if (isSpeaking) voicedFrameCount += 1;
 
         if (!isSpeaking && speechFrameCount >= vadConfig.speechFramesRequired) {
             isSpeaking = true;
             speechBuffers = [];
+            voicedFrameCount = 1;
             console.log('[LocalAI] Speech started (RMS:', rms.toFixed(4), ')');
             sendToRenderer('update-status', 'Listening... (speech detected)');
         }
@@ -157,6 +164,13 @@ function processVad(pcm16kBuffer) {
             isSpeaking = false;
             const audioData = Buffer.concat(speechBuffers);
             speechBuffers = [];
+            // The buffer also holds the silence that ended the turn, so its length says nothing
+            // about how much was said: a cough plus 1.5 s of quiet looked like a question.
+            if (voicedFrameCount < MIN_VOICED_FRAMES) {
+                console.log('[LocalAI] Too little speech, skipping (', voicedFrameCount, 'voiced frames )');
+                sendToRenderer('update-status', 'Listening...');
+                return;
+            }
             console.log('[LocalAI] Speech ended, accumulated', audioData.length, 'bytes');
             sendToRenderer('update-status', 'Transcribing...');
             handleSpeechEnd(audioData);
@@ -232,7 +246,7 @@ async function handleSpeechEnd(audioData) {
     try {
         const transcription = await transcribeAudio(audioData);
 
-        if (!transcription || transcription.length < 2) {
+        if (!transcription || transcription.length < 2 || NON_SPEECH.test(transcription)) {
             console.log('[LocalAI] Empty transcription, skipping');
             sendToRenderer('update-status', 'Listening...');
             return;
@@ -716,7 +730,27 @@ async function sendLocalImage(base64Data, prompt) {
     }
 }
 
+// __test — the pure audio/stream helpers, and a way to run the listen → transcribe → cue loop
+// against servers a test started (initializeLocalSession downloads and spawns the real ones).
+const __test = {
+    resample24kTo16k,
+    calculateRms,
+    createWavBuffer,
+    readStreamingResponse,
+    isApiModel,
+    attach({ whisperUrl, llamaUrl, profile = 'cues', model = 'local' }) {
+        closeLocalSession();
+        whisperBaseUrl = whisperUrl;
+        llamaBaseUrl = llamaUrl;
+        llamaModel = model;
+        currentProfile = profile;
+        currentSystemPrompt = getSystemPrompt(profile, '', false);
+        isLocalActive = true;
+    },
+};
+
 module.exports = {
+    __test,
     initializeLocalSession,
     cancelLocalInitialization,
     processLocalAudio,

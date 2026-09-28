@@ -131,6 +131,14 @@ export class CheatingDaddyApp extends LitElement {
             font-weight: var(--font-weight-semibold);
             color: var(--text-primary);
             letter-spacing: -0.01em;
+            margin: 0;
+        }
+
+        .sidebar-credit {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 2px;
         }
 
         .sidebar-nav {
@@ -890,7 +898,8 @@ export class CheatingDaddyApp extends LitElement {
         return html`
             <div class="sidebar ${this._isLiveMode() ? 'hidden' : ''}">
                 <div class="sidebar-brand">
-                    <h1>Cheating Daddy</h1>
+                    <h1>Screen Assistant</h1>
+                    <div class="sidebar-credit">StandMeet · modified from Cheating Daddy</div>
                 </div>
                 <nav class="sidebar-nav">
                     ${items.map(

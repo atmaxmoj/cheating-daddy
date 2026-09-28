@@ -324,8 +324,8 @@ export class MainView extends LitElement {
         .start-button {
             position: relative;
             overflow: hidden;
-            background: #e8e8e8;
-            color: #111111;
+            background: var(--accent);
+            color: var(--btn-primary-text, #f3efe6);
             border: none;
             padding: 12px var(--space-md);
             border-radius: var(--radius-sm);
@@ -337,6 +337,11 @@ export class MainView extends LitElement {
             align-items: center;
             justify-content: center;
             gap: var(--space-sm);
+        }
+
+        /* StandMeet look: a flat vermillion button, no aurora / dither effects */
+        .start-button canvas {
+            display: none;
         }
 
         .start-button canvas.btn-aurora {
@@ -701,8 +706,6 @@ export class MainView extends LitElement {
         _groqKey: { state: true },
         _openaiKey: { state: true },
         _deepseekKey: { state: true },
-        _relayUrl: { state: true },
-        _relayToken: { state: true },
         _roles: { state: true },
         _roleId: { state: true },
         _rolesError: { state: true },
@@ -736,8 +739,6 @@ export class MainView extends LitElement {
         this._groqKey = '';
         this._openaiKey = '';
         this._deepseekKey = '';
-        this._relayUrl = '';
-        this._relayToken = '';
         this._roles = [];
         this._roleId = '';
         this._rolesError = '';
@@ -782,8 +783,6 @@ export class MainView extends LitElement {
             this._groqKey = (await cheatingDaddy.storage.getGroqApiKey().catch(() => '')) || '';
             this._openaiKey = creds.openaiKey || '';
             this._deepseekKey = creds.deepseekApiKey || '';
-            this._relayToken = creds.relayToken || '';
-            this._relayUrl = prefs.relayUrl || '';
             this._roleId = prefs.standmeetRoleId || '';
             this._loadRoles();
             this._geminiLiveModel = config.geminiLiveModel || 'gemini-3.1-flash-live-preview';
@@ -998,18 +997,6 @@ export class MainView extends LitElement {
                 </div>
             </div>
         `;
-    }
-
-    async _saveRelayUrl(val) {
-        this._relayUrl = val;
-        await cheatingDaddy.storage.updatePreference('relayUrl', val.trim());
-        this.requestUpdate();
-    }
-
-    async _saveRelayToken(val) {
-        this._relayToken = val;
-        await cheatingDaddy.storage.setCredentials({ relayToken: val });
-        this.requestUpdate();
     }
 
     async _saveGroqKey(val) {
@@ -1331,7 +1318,7 @@ export class MainView extends LitElement {
                 <summary class="config-summary">
                     <span class="config-summary-text">
                         <span class="config-summary-title">Language model</span>
-                        <span class="config-summary-description">Local GGUF model</span>
+                        <span class="config-summary-description">DeepSeek, or a local GGUF model</span>
                     </span>
                     ${this._renderConfigChevron()}
                 </summary>
@@ -1376,37 +1363,6 @@ export class MainView extends LitElement {
                               `
                             : ''
                     }
-                </div>
-            </details>
-
-            <details class="config-section">
-                <summary class="config-summary">
-                    <span class="config-summary-text">
-                        <span class="config-summary-title">Phone view</span>
-                        <span class="config-summary-description">Mirror cues to a relay you host</span>
-                    </span>
-                    ${this._renderConfigChevron()}
-                </summary>
-                <div class="config-content">
-                    <div class="form-group">
-                        <label class="form-label">Relay URL</label>
-                        <input
-                            type="text"
-                            placeholder="https://sijie.xyz/cheating-daddy"
-                            .value=${this._relayUrl}
-                            @input=${e => this._saveRelayUrl(e.target.value)}
-                        />
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Relay token</label>
-                        <input
-                            type="password"
-                            placeholder="CUE_TOKEN"
-                            .value=${this._relayToken}
-                            @input=${e => this._saveRelayToken(e.target.value)}
-                        />
-                        <div class="form-hint">Open the relay URL on your phone and log in with the same token. Leave empty to keep cues on this Mac only.</div>
-                    </div>
                 </div>
             </details>
 
@@ -1463,13 +1419,13 @@ export class MainView extends LitElement {
                     this._mode === 'local'
                         ? html`
                               <div class="title-row">
-                                  <div class="page-title">Cheating Daddy <span class="mode-suffix">Local AI</span></div>
+                                  <div class="page-title">Screen Assistant <span class="mode-suffix">cue cards</span></div>
                                   <button class="help-btn" @click=${this._openLocalHelp} aria-label="Open Local AI help">${helpIcon}</button>
                               </div>
                           `
-                        : html` <div class="page-title">${html`Cheating Daddy <span class="mode-suffix">BYOK</span>`}</div> `
+                        : html` <div class="page-title">${html`Screen Assistant <span class="mode-suffix">BYOK</span>`}</div> `
                 }
-                <div class="page-subtitle">${this._mode === 'byok' ? 'Bring your own API keys' : 'Run models locally on your machine'}</div>
+                <div class="page-subtitle">${this._mode === 'byok' ? 'Bring your own API keys' : 'Cue cards from your StandMeet corpus — also live in admin → jobs → screen assistant'}</div>
 
                 <!-- Cloud mode render branch intentionally disabled. -->
                 ${this._mode === 'byok' ? this._renderByokMode() : ''} ${this._mode === 'local' ? this._renderLocalMode() : ''}

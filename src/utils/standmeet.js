@@ -110,8 +110,10 @@ const STOP = new Set(
     ),
 );
 
-// stem — a light suffix strip so "test" meets "testing" and "tests".
+// stem — a light suffix strip so "test" meets "testing" and "tests", "isolate" meets "isolation".
 function stem(w) {
+    if (w.length > 6 && w.endsWith('ation')) return w.slice(0, -5);
+    if (w.length > 5 && /[^aeiou]ate[sd]?$/.test(w)) return w.replace(/ate[sd]?$/, '');
     if (w.length > 5 && w.endsWith('ing')) return w.slice(0, -3);
     if (w.length > 4 && w.endsWith('ed')) return w.slice(0, -2);
     if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
@@ -297,4 +299,4 @@ function transcriptionHint() {
     return vocabulary;
 }
 
-module.exports = { loadCorpus, listRoles, contextFor, isLoaded, transcriptionHint, cleanBody, buildIndex, search, uriMatcher };
+module.exports = { createClient, loadCorpus, listRoles, contextFor, isLoaded, transcriptionHint, cleanBody, buildIndex, search, uriMatcher };
