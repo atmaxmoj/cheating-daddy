@@ -1,3 +1,20 @@
+# Screen Assistant — StandMeet's interview cue cards
+
+This branch (`claude-cues`) is **modified from [Cheating Daddy](https://github.com/sohzm/cheating-daddy)** (GPL-3.0) for
+[StandMeet](https://github.com/atmaxmoj/standmeet). It listens to the other side of a call (system audio → local
+whisper.cpp), writes a cue card from **your own StandMeet corpus** (scoped to the interview's role) with DeepSeek, and
+streams the cards to your StandMeet admin (**jobs → screen assistant**) so you can read them on a phone.
+
+**Install (macOS, Apple silicon):** download the `.dmg` from [Releases](../../releases/latest). The build is not
+signed; on first launch run `xattr -dr com.apple.quarantine "/Applications/Screen Assistant.app"`, then grant screen
+recording. Put your StandMeet key at `~/.standmeet/credentials.json` (`{keyId, privateKeyPem}`) and a DeepSeek key in the app.
+
+**Tests:** `npm test` drives the real app end to end; `npm run eval` scores the cue agent against your real corpus.
+
+---
+
+The original README follows.
+
 <img width="1299" height="424" alt="cd (1)" src="https://github.com/user-attachments/assets/b25fff4d-043d-4f38-9985-f832ae0d0f6e" />
 
 ## Recall.ai - API for desktop recording
