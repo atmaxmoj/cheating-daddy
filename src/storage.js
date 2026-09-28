@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
 const DEFAULT_CREDENTIALS = {
     apiKey: '',
     groqApiKey: '',
-    anthropicApiKey: '',
+    deepseekApiKey: '',
 };
 
 const DEFAULT_PREFERENCES = {
@@ -33,7 +33,7 @@ const DEFAULT_PREFERENCES = {
     fontSize: 'medium',
     backgroundTransparency: 0.8,
     googleSearchEnabled: false,
-    localLlmModel: 'claude:claude-haiku-4-5-20251001',
+    localLlmModel: 'deepseek:deepseek-flash',
     whisperModel: 'base.en',
 };
 

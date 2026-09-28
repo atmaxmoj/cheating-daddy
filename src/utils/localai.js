@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const { getSystemPrompt } = require('./prompts');
 const { sendToRenderer, initializeNewSession, saveConversationTurn } = require('./gemini');
-const { requestClaude } = require('./claude');
 const { publishTranscript, publishCue, newCueID } = require('./relay');
 const { getCredentials } = require('../storage');
 const {
@@ -41,12 +40,35 @@ const VAD_MODES = {
 
 let vadConfig = VAD_MODES.VERY_AGGRESSIVE;
 
-// A model id "claude:<model>" keeps local Whisper for transcription and sends replies to the
-// Anthropic API: no llama runner, no model download.
-const CLAUDE_PREFIX = 'claude:';
+// A model id "deepseek:<model>" keeps local Whisper for transcription and sends replies to the
+// DeepSeek API (OpenAI-compatible, the same stream format as llama-server): no llama runner, no
+// model download. Thinking is off: a cue has to land within a second (measured 2026-09-27:
+// deepseek-flash, first token 0.8 s with thinking disabled, 3 s of reasoning otherwise).
+const API_PREFIX = 'deepseek:';
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 
-function isClaudeModel(model) {
-    return typeof model === 'string' && model.startsWith(CLAUDE_PREFIX);
+function isApiModel(model) {
+    return typeof model === 'string' && model.startsWith(API_PREFIX);
+}
+
+async function requestDeepSeek(messages, onText) {
+    const apiKey = getCredentials().deepseekApiKey;
+    if (!apiKey) throw new Error('DeepSeek API key is not set');
+    const response = await fetch(DEEPSEEK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+            model: llamaModel.slice(API_PREFIX.length),
+            messages,
+            stream: true,
+            max_tokens: 512,
+            thinking: { type: 'disabled' },
+        }),
+    });
+    if (!response.ok || !response.body) {
+        throw new Error(`DeepSeek returned HTTP ${response.status}: ${await response.text()}`);
+    }
+    return readStreamingResponse(response, onText);
 }
 let resampleRemainder = Buffer.alloc(0);
 
@@ -224,9 +246,8 @@ async function readStreamingResponse(response, onText) {
 }
 
 async function requestLlama(messages, onText) {
-    if (isClaudeModel(llamaModel)) {
-        const apiKey = getCredentials().anthropicApiKey;
-        return requestClaude({ apiKey, model: llamaModel.slice(CLAUDE_PREFIX.length), messages }, onText);
+    if (isApiModel(llamaModel)) {
+        return requestDeepSeek(messages, onText);
     }
     if (!llamaBaseUrl) {
         throw new Error('Llama server is not running');
@@ -348,10 +369,10 @@ async function prepareNativeFiles(llamaModelReference, whisperModel, signal) {
         sendToRenderer('update-status', formatDownloadStatus(label, progress));
         sendDownloadProgress(label, progress);
     };
-    const usesClaude = isClaudeModel(llamaModelReference);
+    const usesApi = isApiModel(llamaModelReference);
 
     let llamaBinaryPath = null;
-    if (!usesClaude) {
+    if (!usesApi) {
         sendDownloadProgress('Checking Llama runner');
         llamaBinaryPath = await ensureNativeBinary('llama', binaryProgress('Llama runner'), signal);
     }
@@ -368,7 +389,7 @@ async function prepareNativeFiles(llamaModelReference, whisperModel, signal) {
         sendToRenderer('whisper-downloading', false);
     }
 
-    if (usesClaude) {
+    if (usesApi) {
         return { whisperBinaryPath, whisperModelPath };
     }
 
@@ -383,7 +404,7 @@ async function prepareNativeFiles(llamaModelReference, whisperModel, signal) {
     };
 }
 
-function validatePreparedNativeFiles(nativeFiles, usesClaude) {
+function validatePreparedNativeFiles(nativeFiles, usesApi) {
     const whisperFiles = [
         ['Whisper runner', nativeFiles.whisperBinaryPath],
         ['Whisper model', nativeFiles.whisperModelPath],
@@ -393,7 +414,7 @@ function validatePreparedNativeFiles(nativeFiles, usesClaude) {
         ['Language model', nativeFiles.llamaModelPath],
         ['Vision model', nativeFiles.projectorPath],
     ];
-    const requiredFiles = usesClaude ? whisperFiles : [...whisperFiles, ...llamaFiles];
+    const requiredFiles = usesApi ? whisperFiles : [...whisperFiles, ...llamaFiles];
 
     for (const [label, filePath] of requiredFiles) {
         if (!filePath || !fs.existsSync(filePath)) {
@@ -463,18 +484,18 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
         currentSystemPrompt = getSystemPrompt(profile, customPrompt, false);
         llamaModel = model;
 
-        const usesClaude = isClaudeModel(model);
-        if (usesClaude && !getCredentials().anthropicApiKey) {
-            throw new Error('Add your Anthropic API key to use Claude');
+        const usesApi = isApiModel(model);
+        if (usesApi && !getCredentials().deepseekApiKey) {
+            throw new Error('Add your DeepSeek API key to use DeepSeek');
         }
         const nativeFiles = await prepareNativeFiles(model, whisperModel, initializationController.signal);
-        validatePreparedNativeFiles(nativeFiles, usesClaude);
+        validatePreparedNativeFiles(nativeFiles, usesApi);
 
         sendToRenderer('update-status', 'Starting Whisper...');
         sendDownloadProgress('Starting Whisper');
         await startWhisperServer(nativeFiles.whisperBinaryPath, nativeFiles.whisperModelPath);
 
-        if (!usesClaude) {
+        if (!usesApi) {
             sendToRenderer('update-status', 'Loading local language model...');
             sendDownloadProgress('Loading language model');
             await startLlamaServer(nativeFiles.llamaBinaryPath, nativeFiles.llamaModelPath, nativeFiles.projectorPath);

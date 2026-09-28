@@ -155,7 +155,7 @@ async function initializeGemini(profile = 'interview', language = 'en-US') {
 
 async function initializeLocal(profile = 'interview') {
     const prefs = await storage.getPreferences();
-    const localLlmModel = prefs.localLlmModel || 'claude:claude-haiku-4-5-20251001';
+    const localLlmModel = prefs.localLlmModel || 'deepseek:deepseek-flash';
     const whisperModel = prefs.whisperModel || 'base.en';
     const customPrompt = prefs.customPrompt || '';
 

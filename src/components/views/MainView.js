@@ -1,8 +1,8 @@
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
 
 const LOCAL_LLM_PRESETS = [
-    { value: 'claude:claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 — Anthropic API · Fastest, no download' },
-    { value: 'claude:claude-sonnet-5', label: 'Claude Sonnet 5 — Anthropic API · Smarter' },
+    { value: 'deepseek:deepseek-flash', label: 'DeepSeek V4.1 Flash — API · Fastest, no download' },
+    { value: 'deepseek:deepseek-v4-pro', label: 'DeepSeek V4 Pro — API · Smarter, text only' },
     { value: 'unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M', label: 'Qwen 3.5 0.8B Q4 — 0.74 GB · Fastest' },
     { value: 'unsloth/Qwen3.5-0.8B-GGUF:Q8_0', label: 'Qwen 3.5 0.8B Q8 — 1.02 GB' },
     { value: 'unsloth/Qwen3.5-2B-GGUF:Q4_K_M', label: 'Qwen 3.5 2B Q4 — 1.95 GB' },
@@ -700,7 +700,7 @@ export class MainView extends LitElement {
         _geminiKey: { state: true },
         _groqKey: { state: true },
         _openaiKey: { state: true },
-        _anthropicKey: { state: true },
+        _deepseekKey: { state: true },
         _relayUrl: { state: true },
         _relayToken: { state: true },
         _geminiLiveModel: { state: true },
@@ -732,7 +732,7 @@ export class MainView extends LitElement {
         this._geminiKey = '';
         this._groqKey = '';
         this._openaiKey = '';
-        this._anthropicKey = '';
+        this._deepseekKey = '';
         this._relayUrl = '';
         this._relayToken = '';
         this._geminiLiveModel = 'gemini-3.1-flash-live-preview';
@@ -742,7 +742,7 @@ export class MainView extends LitElement {
         this._tokenError = false;
         this._keyError = false;
         this._showLocalHelp = false;
-        this._localLlmModel = 'claude:claude-haiku-4-5-20251001';
+        this._localLlmModel = 'deepseek:deepseek-flash';
         this._useCustomLocalLlmModel = false;
         this._whisperModel = 'base.en';
 
@@ -775,7 +775,7 @@ export class MainView extends LitElement {
             this._geminiKey = (await cheatingDaddy.storage.getApiKey().catch(() => '')) || '';
             this._groqKey = (await cheatingDaddy.storage.getGroqApiKey().catch(() => '')) || '';
             this._openaiKey = creds.openaiKey || '';
-            this._anthropicKey = creds.anthropicApiKey || '';
+            this._deepseekKey = creds.deepseekApiKey || '';
             this._relayToken = creds.relayToken || '';
             this._relayUrl = prefs.relayUrl || '';
             this._geminiLiveModel = config.geminiLiveModel || 'gemini-3.1-flash-live-preview';
@@ -784,7 +784,7 @@ export class MainView extends LitElement {
             this._disableGroqThinking = config.disableGroqThinking === true;
 
             // Load local AI settings
-            this._localLlmModel = prefs.localLlmModel || 'claude:claude-haiku-4-5-20251001';
+            this._localLlmModel = prefs.localLlmModel || 'deepseek:deepseek-flash';
             this._useCustomLocalLlmModel = !LOCAL_LLM_PRESETS.some(preset => preset.value === this._localLlmModel);
             this._whisperModel = prefs.whisperModel || 'base.en';
 
@@ -950,10 +950,10 @@ export class MainView extends LitElement {
         this.requestUpdate();
     }
 
-    async _saveAnthropicKey(val) {
-        this._anthropicKey = val;
+    async _saveDeepseekKey(val) {
+        this._deepseekKey = val;
         this._keyError = false;
-        await cheatingDaddy.storage.setCredentials({ anthropicApiKey: val });
+        await cheatingDaddy.storage.setCredentials({ deepseekApiKey: val });
         this.requestUpdate();
     }
 
@@ -1062,7 +1062,7 @@ export class MainView extends LitElement {
             if (!this._localLlmModel.trim()) {
                 return;
             }
-            if (this._localLlmModel.startsWith('claude:') && !this._anthropicKey.trim()) {
+            if (this._localLlmModel.startsWith('deepseek:') && !this._deepseekKey.trim()) {
                 this._keyError = true;
                 this.requestUpdate();
                 return;
@@ -1315,18 +1315,18 @@ export class MainView extends LitElement {
                         <div class="form-hint">Sizes include the vision model. Q4 uses less memory; Q8 preserves more quality.</div>
                     </div>
                     ${
-                        this._localLlmModel.startsWith('claude:')
+                        this._localLlmModel.startsWith('deepseek:')
                             ? html`
                                   <div class="form-group">
-                                      <label class="form-label">Anthropic API key</label>
+                                      <label class="form-label">DeepSeek API key</label>
                                       <input
                                           type="password"
-                                          placeholder="sk-ant-…"
-                                          .value=${this._anthropicKey}
-                                          @input=${e => this._saveAnthropicKey(e.target.value)}
+                                          placeholder="sk-…"
+                                          .value=${this._deepseekKey}
+                                          @input=${e => this._saveDeepseekKey(e.target.value)}
                                           class=${this._keyError ? 'error' : ''}
                                       />
-                                      <div class="form-hint">Speech is transcribed on this Mac by Whisper; only the text goes to Claude.</div>
+                                      <div class="form-hint">Speech is transcribed on this Mac by Whisper; only the text goes to DeepSeek.</div>
                                   </div>
                               `
                             : ''
