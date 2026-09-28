@@ -109,10 +109,22 @@ const STOP = new Set(
     ),
 );
 
-// tokens — lowercase words, plus character bigrams for CJK runs (no spaces to split on).
-function tokens(text) {
+// stem — a light suffix strip so "test" meets "testing" and "tests".
+function stem(w) {
+    if (w.length > 5 && w.endsWith('ing')) return w.slice(0, -3);
+    if (w.length > 4 && w.endsWith('ed')) return w.slice(0, -2);
+    if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
+    return w;
+}
+
+// tokens — lowercase stemmed words, plus character bigrams for CJK runs (no spaces to split on).
+// joinPairs adds each adjacent pair glued together: speech splits names ("stand meet", "you
+// teacher") that the notes spell as one word.
+function tokens(text, joinPairs = false) {
     const out = [];
-    for (const w of (text || '').toLowerCase().match(/[a-z0-9]+/g) || []) if (w.length > 1 && !STOP.has(w)) out.push(w);
+    const words = (text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+    for (const w of words) if (w.length > 1 && !STOP.has(w)) out.push(stem(w));
+    if (joinPairs) for (let i = 0; i < words.length - 1; i++) out.push(stem(words[i] + words[i + 1]));
     for (const run of (text || '').match(/[一-鿿]+/g) || []) {
         for (let i = 0; i < run.length - 1; i++) out.push(run.slice(i, i + 2));
     }
@@ -133,7 +145,7 @@ function buildIndex(notes) {
 }
 
 function search(index, query, k = TOP_K) {
-    const terms = [...new Set(tokens(query))];
+    const terms = [...new Set(tokens(query, true))];
     const k1 = 1.2;
     const b = 0.75;
     return index.docs
@@ -208,6 +220,10 @@ async function loadCorpus(host, onProgress = () => {}) {
     });
     const usable = notes.filter(n => n.text || n.title);
     projects = projectOverview(usable);
+    vocabulary = usable
+        .filter(n => PROJECT_ROOT.test(n.path))
+        .map(n => n.title.replace(/[-_]/g, ' '))
+        .join(', ');
     index = buildIndex(usable);
     return index.n;
 }
@@ -226,4 +242,12 @@ function isLoaded() {
     return index !== null;
 }
 
-module.exports = { loadCorpus, contextFor, isLoaded, cleanBody, buildIndex, search };
+let vocabulary = '';
+
+// transcriptionHint — the user's own names (projects and top-level topics) for Whisper's prompt,
+// so "StandMeet" is not heard as "stand meet". '' before loading.
+function transcriptionHint() {
+    return vocabulary;
+}
+
+module.exports = { loadCorpus, contextFor, isLoaded, transcriptionHint, cleanBody, buildIndex, search };

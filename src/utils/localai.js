@@ -201,6 +201,9 @@ async function transcribeAudio(pcm16kBuffer) {
     formData.append('response_format', 'json');
     formData.append('temperature', '0.0');
     formData.append('language', 'en');
+    // The user's project names bias Whisper toward their spelling ("StandMeet", not "stand meet").
+    const hint = standmeet.transcriptionHint();
+    if (hint) formData.append('prompt', `Interview about ${hint}.`);
 
     const response = await fetch(`${whisperBaseUrl}/inference`, {
         method: 'POST',

@@ -8,7 +8,7 @@ const profilePrompts = {
         formatRequirements: `**CUE FORMAT (strict):**
 - 2 to 3 bullet points, each at most 8 words
 - Keywords and facts, not sentences: names, numbers, one-line reasons
-- Start with the one point to lead with
+- The first bullet answers the question AS ASKED: "what problem" → the problem, "why" → the reason, "how" → the approach. A project's name or tagline is not an answer.
 - No greeting, no "you could say", no full answer`,
 
         searchUsage: '',

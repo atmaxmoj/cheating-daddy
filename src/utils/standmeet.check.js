@@ -29,7 +29,11 @@ const index = buildIndex([
     { title: 'untrusted-build-bulkhead', path: 'software/untrusted-build-bulkhead', text: 'run untrusted code in a sandbox, network off' },
     { title: 'short-video', path: 'marketing/awareness/short-video', text: 'hooks readable in three seconds' },
     { title: '短视频', path: 'marketing/短视频', text: '三秒钩子' },
+    { title: 'standmeet', path: 'software/project/standmeet', text: 'audience-tailored introduction' },
+    { title: 'testing-software-3-0', path: 'cybernetics/engineering/testing-software-3-0', text: 'golden sets and evals' },
 ]);
+assert.equal(search(index, 'Tell me about stand meet')[0].title, 'standmeet', 'a name speech split in two');
+assert.equal(search(index, 'How do you test prompts?')[0].title, 'testing-software-3-0', 'test meets testing');
 assert.equal(search(index, 'How would you run untrusted code?')[0].title, 'untrusted-build-bulkhead');
 assert.equal(search(index, 'what is a gate')[0].title, 'stages-and-gates');
 assert.equal(search(index, '短视频怎么做')[0].title, '短视频', 'CJK bigrams match');
