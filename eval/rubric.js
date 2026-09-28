@@ -15,7 +15,10 @@ function lines(card) {
 // "- <title>: …" project overview lines).
 function noteTitles(context) {
     const titles = new Set();
-    for (const m of context.matchAll(/^## (.+?) \(/gm)) titles.add(m[1].trim().toLowerCase());
+    for (const m of context.matchAll(/^## (.+?) \(/gm)) {
+        titles.add(m[1].trim().toLowerCase()); // "deployment › the stance"
+        titles.add(m[1].split(' › ')[0].trim().toLowerCase()); // or just the note, "deployment"
+    }
     for (const m of context.matchAll(/^- ([^:\n]+):/gm)) titles.add(m[1].trim().toLowerCase());
     return titles;
 }
@@ -25,8 +28,54 @@ function projectNames(context) {
     return [...section.matchAll(/^- ([^:\n]+):/gm)].map(m => m[1].trim());
 }
 
+// matrixRows — the choice matrix's data rows as arrays of cells (header and --- row dropped).
+function matrixRows(card) {
+    const rows = lines(card).filter(l => l.startsWith('|'));
+    return rows
+        .slice(1)
+        .filter(r => !/^\|[\s|:-]+\|$/.test(r))
+        .map(r => r.replace(/^\||\|$/g, '').split('|').map(s => s.trim()));
+}
+
+// checkMatrix — c.matrix set: the question names a technology, so the matrix must be there, lead
+// with the pick, include the named alternatives, and list only options the context mentions.
+// c.matrix unset: no matrix at all.
+function checkMatrix(card, context, c) {
+    const rows = matrixRows(card);
+    if (!c.matrix) return { noMatrix: { ok: rows.length === 0, why: `${rows.length} matrix rows on a question that names no technology` } };
+    const ctx = context.toLowerCase();
+    const named = rows.map(r => (r[0] || '').replace(/\(.*?\)|[*`]/g, '').trim());
+    const text = rows.map(r => r.join(' ')).join('\n');
+    return {
+        matrix: { ok: rows.length >= 2 && rows.length <= 4, why: `${rows.length} rows` },
+        matrixPickFirst: { ok: rows.length > 0 && c.matrix.chosen.test(rows[0][0]) && /✓|yes/i.test(rows[0][1] || ''), why: `first row: ${JSON.stringify(rows[0])}` },
+        matrixAlternatives: { ok: c.matrix.alts.every(a => a.test(text)), why: `rows ${JSON.stringify(named)} vs ${c.matrix.alts}` },
+        matrixGrounded: {
+            ok: named.length > 0 && named.every(n => n.toLowerCase().split(/[\s/]+/).some(w => w.length >= 3 && ctx.includes(w))),
+            why: `options ${JSON.stringify(named)} must appear in the context`,
+        },
+    };
+}
+
+const content = s => new Set(words(s.toLowerCase()).filter(w => w.length > 3));
+
+// checkSupplement — optional, the model's call. When present: short, and new — no card point
+// shares more than half its content words (a restated point is not a supplement).
+function checkSupplement(card, points) {
+    const line = lines(card).find(l => l.startsWith('**Supplementary:**'));
+    if (!line) return {};
+    const body = line.replace('**Supplementary:**', '');
+    const mine = content(body);
+    const overlap = Math.max(0, ...points.map(p => [...content(p)].filter(w => mine.has(w)).length / Math.max(1, mine.size)));
+    return {
+        supplementShort: { ok: words(body).length <= 35, why: `${words(body).length} words` },
+        supplementNew: { ok: overlap <= 0.5, why: `${Math.round(overlap * 100)}% of its words repeat one point` },
+    };
+}
+
 function checkAnswer(card, context, c) {
-    const ls = lines(card);
+    const all = lines(card);
+    const ls = all.filter(l => !l.startsWith('|') && !l.startsWith('**Why this over') && !l.startsWith('**Supplementary:**'));
     const key = /^\*\*Key:\s*(.+?)\*\*$/.exec(ls[0] || '');
     const ideas = key ? key[1].split('+').map(s => s.trim()) : [];
     const points = ls.filter(l => /^[-*] /.test(l));
@@ -35,8 +84,10 @@ function checkAnswer(card, context, c) {
     const cited = from ? from[1].split(/,\s*/).map(s => s.trim().toLowerCase()) : [];
     const known = noteTitles(context);
     const projects = projectNames(context);
-    const n = words(card).length;
+    const n = words(ls.join('\n')).length; // the matrix does not count toward the limit
     return {
+        ...checkMatrix(card, context, c),
+        ...checkSupplement(card, points),
         retrieval: { ok: c.notes.test(context), why: `context paths ${c.notes}` },
         keyLine: { ok: !!key, why: `first line: ${ls[0]}` },
         keyPlain: {
@@ -52,7 +103,8 @@ function checkAnswer(card, context, c) {
             why: `example "${example.slice(0, 80)}" vs projects ${JSON.stringify(projects)}`,
         },
         fromIsReal: {
-            ok: cited.length > 0 && cited.every(t => known.has(t)),
+            // a cited section may be shortened ("deployment › the instance has no control…"); its note must exist
+            ok: cited.length > 0 && cited.every(t => known.has(t) || known.has(t.split(' › ')[0].trim())),
             why: `cited ${JSON.stringify(cited)}`,
         },
         length: { ok: n >= 70 && n <= 180, why: `${n} words` },

@@ -10,6 +10,12 @@ const http = require('http');
 const NOTES = [
     { id: 'n1', path: 'software/project/standmeet', title: 'standmeet', body: 'StandMeet is a self-hosted page where visitors chat with an AI grounded in my notes. Owners upload their own microsite code.' },
     { id: 'n2', path: 'software/project/standmeet/sandbox', title: 'sandbox', body: 'Every microsite build from an owner runs untrusted code, so each build runs in its own container with the network off: isolation plus a sandbox. The container is thrown away after the build.' },
+    {
+        id: 'n5',
+        path: 'software/project/standmeet/deployment',
+        title: 'deployment',
+        body: '# Deployment\n\nOne box, docker compose.\n\n## Why bubblewrap and not Docker for the plugin sandbox\n\nThe backend deliberately gets no docker.sock: holding it would give the backend root on the host. So the plugin sandbox runs on bubblewrap, which builds user and mount namespaces without a daemon. Docker would have given full containers, but only by handing the backend the socket.',
+    },
     { id: 'n3', path: 'software/project/youteacher', title: 'youteacher', body: 'YouTeacher turns videos into lessons.' },
     { id: 'n4', path: 'cooking/risotto', title: 'risotto', body: 'Stir the rice slowly.' },
 ];

@@ -15,6 +15,15 @@ const profilePrompts = {
 
 **Example:** <from the user's OWN projects (the "Your projects" section and project notes: StandMeet, YouTeacher, Lucerna, …) — what they built or did there that shows the key idea, in two sentences: the situation, what they did, what came of it. Never another company's story; if no project fits, take the closest project and say how it relates>
 
+<OPTIONAL — the choice matrix, for a deep dive on why one technology was picked:>
+**Why this over the alternatives:**
+| Option | Picked | Good at | Why (not) here |
+|---|---|---|---|
+| <the one the user chose> | ✓ | <strength> | <the reason it won, from the notes> |
+| <an alternative the notes name> | | <its strength> | <why it lost here> |
+
+**Supplementary:** <OPTIONAL — one thing you judge would help most that the card does not already say: the follow-up the interviewer is likely to ask next and a one-line answer, a concrete number, or the trade-off / limit the user should admit. From the notes only; at most 35 words; leave the line out when nothing adds>
+
 _From: <titles of the notes you used>_
 
 Rules:
@@ -22,7 +31,9 @@ Rules:
 - Plain words. When a note uses its own term (e.g. "certificate", "gate", "P×C"), say what it means in a few plain words the first time.
 - Every point carries a detail the user can expand on. A bare label ("stages & gates") is not a point.
 - Short enough to read at a glance: each point at most 20 words, the Example at most 40 words, 80 to 150 words in total. Three tight points beat four long ones. No greeting, no "you could say".
-- Name a project in the Example only when a note ties this material to that project; otherwise use a project note that does.`,
+- Name a project in the Example only when a note ties this material to that project; otherwise use a project note that does.
+- The choice matrix: follow the "# Choice matrix" line in the context — REQUIRED means include it, OFF means leave the whole section out. An alternative is something that could do the same job as the chosen one; a tool the notes use for a different job is not an alternative. The chosen option is the first row; 2 to 4 rows; every option and reason comes from the notes. The matrix does not count toward the word limit.
+- Supplementary is yours to decide, and most cards need none. Add it only when you have one of: a follow-up this interviewer is likely to ask plus a concrete one-line answer, a number, or a trade-off the notes state — and it is not already on the card. A general principle or a reworded point is not a supplement; when unsure, leave it out. It does not count toward the word limit.`,
 
         searchUsage: '',
 

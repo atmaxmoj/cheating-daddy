@@ -76,9 +76,9 @@ test('screen assistant', async t => {
         assert.equal(prefs.standmeetRoleId, 'r-sm');
     });
 
-    await t.test('start: the role-scoped corpus loads (2 notes) and it listens', async () => {
+    await t.test('start: the role-scoped corpus loads (3 notes) and it listens', async () => {
         await win.locator('.start-button').click();
-        await win.getByText('Ready (2 notes)', { exact: false }).waitFor({ timeout: 120_000 });
+        await win.getByText('Ready (3 notes)', { exact: false }).waitFor({ timeout: 120_000 });
     });
 
     await t.test('a spoken question: transcript line, then a cue card from the role notes', async () => {
@@ -108,6 +108,20 @@ test('screen assistant', async t => {
         assert.match(standmeet.calls.pushes.find(p => p.kind === 'heard').text, /untrusted code/i);
         assert.ok(last, 'a cue was pushed');
         assert.ok(card.includes(last.text.split('\n')[0].replace(/\*/g, '').trim().slice(0, 20)), 'the pushed card is the card on screen');
+    });
+
+    await t.test('a question naming a technology gets the choice matrix, pick first', async () => {
+        await say('Why did you use bubblewrap for the plugin sandbox instead of Docker?');
+        await win.locator('.transcript-line', { hasText: /docker/i }).waitFor({ timeout: 30_000 });
+        const table = win.locator('#responseContainer table');
+        await table.waitFor({ timeout: 30_000 });
+        await win.locator('#responseContainer').getByText(/From:/).waitFor({ timeout: 30_000 });
+        const rows = await table.locator('tbody tr').allInnerTexts();
+        assert.match(rows[0], /bubble ?wrap|bwrap/i, 'the pick is the first row');
+        assert.ok(rows.some(r => /docker/i.test(r)), 'Docker is weighed against it');
+        await win.screenshot({ path: path.join(ROOT, 'test-results', 'choice-matrix.png') });
+        await new Promise(r => setTimeout(r, 1500));
+        assert.match(standmeet.calls.pushes.filter(p => p.kind === 'cue').at(-1).text, /\|\s*(bubble ?wrap|bwrap)/i, 'the phone gets the table too');
     });
 
     await t.test('small talk gives no card', async () => {

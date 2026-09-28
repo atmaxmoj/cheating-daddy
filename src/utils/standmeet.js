@@ -20,6 +20,7 @@ const NOTE_CHARS = 4000; // kept per note (and searched)
 const CONTEXT_CHARS = 2000; // per note in a prompt: enough for the details and examples a cue needs
 const TOP_K = 6;
 const PROJECT_K = 3; // extra slots for the user's project notes (the source of the cue's example)
+const STACK_K = 3; // extra slots for the sections about a technology the question names
 
 // ── owner MCP client ──
 
@@ -79,6 +80,11 @@ function createClient(host) {
 // cleanBody — the English pane of a bilingual note as plain prose: callout quoting, HTML, code
 // and diagram blocks, and wiki-link brackets removed.
 function cleanBody(body) {
+    return plain(englishPane(body)).slice(0, NOTE_CHARS);
+}
+
+// englishPane — the English pane with quoting, HTML, code and link brackets removed; headings kept.
+function englishPane(body) {
     let text = body || '';
     const en = text.indexOf('[!lang] en');
     if (en >= 0) {
@@ -94,12 +100,28 @@ function cleanBody(body) {
         .replace(/<[^>]+>/g, ' ')
         .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
         .replace(/\[\[([^\]]+)\]\]/g, '$1')
+        .replace(/\[!i18n\]|\[!lang\][^\n]*/g, ' ');
+}
+
+function plain(text) {
+    return text
         .replace(/^#+\s*/gm, '')
-        .replace(/\[!i18n\]|\[!lang\][^\n]*/g, ' ')
         .replace(/[ \t]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
-        .trim()
-        .slice(0, NOTE_CHARS);
+        .trim();
+}
+
+// sections — a note split at its "## " headings. A long note keeps its later sections (the
+// reasons behind a choice often sit far down: "why bubblewrap, not Docker" is section 4 of
+// `deployment`), and a question pulls in the one section that answers it, not the note's opening.
+function sections(body) {
+    return englishPane(body)
+        .split(/\n(?=##\s)/)
+        .map(s => {
+            const m = /^##\s+(.+)/.exec(s);
+            return { heading: m ? m[1].trim() : '', text: plain(s).slice(0, NOTE_CHARS) };
+        })
+        .filter(s => s.text);
 }
 
 // ── BM25 index ──
@@ -260,7 +282,8 @@ async function loadCorpus(host, role = null, onProgress = () => {}) {
     const notes = await mapLimit(listed, CONCURRENCY, async item => {
         const full = await client.tool('corpus.get', { genre: item.genre, id: item.id }).catch(() => null);
         onProgress(++done, listed.length);
-        return { title: item.title, path: item.path || '', text: cleanBody(full ? full.body : item.preview) };
+        const body = full ? full.body : item.preview;
+        return { title: item.title, path: item.path || '', text: cleanBody(body), sections: sections(body) };
     });
     roleBrief = role ? `${role.name}${role.description ? ` — ${role.description}` : ''}` : '';
     const usable = notes.filter(n => n.text || n.title);
@@ -269,22 +292,86 @@ async function loadCorpus(host, role = null, onProgress = () => {}) {
         .filter(n => PROJECT_ROOT.test(n.path))
         .map(n => n.title.replace(/[-_]/g, ' '))
         .join(', ');
-    index = buildIndex(usable);
-    return index.n;
+    // one search unit per section; a note without headings is one unit
+    const units = usable.flatMap(n =>
+        n.sections.length > 1
+            ? n.sections.map(s => ({ title: s.heading ? `${n.title} › ${s.heading}` : n.title, path: n.path, text: s.text }))
+            : [{ title: n.title, path: n.path, text: n.text }],
+    );
+    index = buildIndex(units);
+    return usable.length;
 }
+
+// STACK — technology names that turn on the choice matrix when a question names one. Deciding
+// this in code, not in the prompt: left to the model, "include it only when…" held 5 times in 9
+// (eval, 2026-09-28). Aliases map to the name the notes use.
+// ponytail: a hand-kept list; a name missing here gets no matrix — add it when a question misses.
+const STACK = {
+    bubblewrap: /\b(bubble ?wrap|bwrap)\b/i,
+    Docker: /\bdocker\b/i,
+    Podman: /\bpodman\b/i,
+    Firecracker: /\bfirecracker\b/i,
+    gVisor: /\bg ?visor\b/i,
+    Kubernetes: /\b(kubernetes|k8s)\b/i,
+    Postgres: /\bpostgres(ql)?\b/i,
+    pgvector: /\bpg ?vector\b/i,
+    Redis: /\bredis\b/i,
+    River: /\bRiver\b/,
+    Kafka: /\bkafka\b/i,
+    RabbitMQ: /\brabbit ?mq\b/i,
+    NATS: /\bnats\b/i,
+    SQLite: /\bsqlite\b/i,
+    MongoDB: /\bmongo(db)?\b/i,
+    Meilisearch: /\bmeili ?search\b/i,
+    Elasticsearch: /\belastic ?search\b/i,
+    MinIO: /\bmin ?io\b/i,
+    Gotenberg: /\bgotenberg\b/i,
+    Typst: /\btypst\b/i,
+    Puppeteer: /\bpuppeteer\b/i,
+    Playwright: /\bplaywright\b/i,
+    'Next.js': /\bnext ?(\.|dot )?js\b/i,
+    // Names that are also everyday words match only as proper nouns ("React", not "how do you react").
+    React: /\bReact(\.?js)?\b/,
+    Vite: /\bvite\b/i,
+    Tailwind: /\btailwind\b/i,
+    Puck: /\bPuck\b/,
+    Go: /\b(golang|go backend|in go)\b/i,
+    Electron: /\belectron\b/i,
+    Whisper: /\bWhisper\b/,
+    DeepSeek: /\bdeep ?seek\b/i,
+    Traefik: /\btraefik\b/i,
+    Caddy: /\bCaddy\b/,
+    Coolify: /\bcoolify\b/i,
+    CircleCI: /\bcircle ?ci\b/i,
+    MCP: /\bmcp\b/i,
+    sqlc: /\bsqlc\b/i,
+};
+
+// stackIn — the technologies a question names, as the notes spell them.
+function stackIn(query) {
+    return Object.keys(STACK).filter(name => STACK[name].test(query || ''));
+}
+
+const MATRIX_ON = names =>
+    `# Choice matrix: REQUIRED\nThis question names ${names.join(', ')}. Include the choice matrix, ${names[0]} in the first row, alternatives for the same job from the notes. If the notes name no alternative for this job, write the one line _No alternatives in your notes._ in its place.`;
+const MATRIX_OFF = '# Choice matrix: OFF\nThis question names no technology. Do not include a choice matrix.';
 
 // contextFor — the user's projects, then the notes most relevant to what was just said, as prompt
 // text ('' before loading).
 function contextFor(query) {
     if (!index) return '';
     // The cue's example must come from the user's own projects, so project notes get their own
-    // slots next to the best matches from the whole corpus.
+    // slots next to the best matches from the whole corpus. A named technology gets its own slots
+    // too: the sections most about it are where the notes weigh it against its alternatives.
+    const named = stackIn(query);
     const general = search(index, query);
     const fromProjects = search(index, query, PROJECT_K, n => n.path.startsWith('software/project/'));
-    const picked = [...general, ...fromProjects.filter(n => !general.includes(n))];
+    const aboutStack = named.length ? search(index, named.join(' '), STACK_K) : [];
+    const picked = [...new Set([...general, ...fromProjects, ...aboutStack])];
     const notes = picked.map(n => `## ${n.title} (${n.path})\n${n.text.slice(0, CONTEXT_CHARS)}`).join('\n\n');
     const brief = roleBrief ? `# This interview\n${roleBrief}\nLead with what matters for this role.\n\n` : '';
-    return `${brief}# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
+    const matrix = named.length ? MATRIX_ON(named) : MATRIX_OFF;
+    return `${brief}${matrix}\n\n# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
 }
 
 function isLoaded() {
