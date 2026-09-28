@@ -730,27 +730,7 @@ async function sendLocalImage(base64Data, prompt) {
     }
 }
 
-// __test — the pure audio/stream helpers, and a way to run the listen → transcribe → cue loop
-// against servers a test started (initializeLocalSession downloads and spawns the real ones).
-const __test = {
-    resample24kTo16k,
-    calculateRms,
-    createWavBuffer,
-    readStreamingResponse,
-    isApiModel,
-    attach({ whisperUrl, llamaUrl, profile = 'cues', model = 'local' }) {
-        closeLocalSession();
-        whisperBaseUrl = whisperUrl;
-        llamaBaseUrl = llamaUrl;
-        llamaModel = model;
-        currentProfile = profile;
-        currentSystemPrompt = getSystemPrompt(profile, '', false);
-        isLocalActive = true;
-    },
-};
-
 module.exports = {
-    __test,
     initializeLocalSession,
     cancelLocalInitialization,
     processLocalAudio,

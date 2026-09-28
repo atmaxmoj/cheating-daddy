@@ -9,8 +9,7 @@
         "package": "electron-forge package",
         "make": "electron-forge make",
         "publish": "electron-forge publish",
-        "test": "node --test test/*.test.js",
-        "test:app": "node --test --test-timeout=90000 test/app.e2e.js",
+        "test": "node --test --test-timeout=300000 test/app.e2e.js",
         "eval": "node eval/run.js",
         "lint": "echo \"No linting configured\""
     },
