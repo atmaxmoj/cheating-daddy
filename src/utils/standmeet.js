@@ -19,6 +19,7 @@ const CONCURRENCY = 16;
 const NOTE_CHARS = 4000; // kept per note (and searched)
 const CONTEXT_CHARS = 2000; // per note in a prompt: enough for the details and examples a cue needs
 const TOP_K = 6;
+const PROJECT_K = 3; // extra slots for the user's project notes (the source of the cue's example)
 
 // ── owner MCP client ──
 
@@ -144,11 +145,12 @@ function buildIndex(notes) {
     return { docs, df, avg, n: docs.length };
 }
 
-function search(index, query, k = TOP_K) {
+function search(index, query, k = TOP_K, where = () => true) {
     const terms = [...new Set(tokens(query, true))];
     const k1 = 1.2;
     const b = 0.75;
     return index.docs
+        .filter(d => where(d.note))
         .map(d => {
             let score = 0;
             for (const t of terms) {
@@ -232,9 +234,12 @@ async function loadCorpus(host, onProgress = () => {}) {
 // text ('' before loading).
 function contextFor(query) {
     if (!index) return '';
-    const notes = search(index, query)
-        .map(n => `## ${n.title} (${n.path})\n${n.text.slice(0, CONTEXT_CHARS)}`)
-        .join('\n\n');
+    // The cue's example must come from the user's own projects, so project notes get their own
+    // slots next to the best matches from the whole corpus.
+    const general = search(index, query);
+    const fromProjects = search(index, query, PROJECT_K, n => n.path.startsWith('software/project/'));
+    const picked = [...general, ...fromProjects.filter(n => !general.includes(n))];
+    const notes = picked.map(n => `## ${n.title} (${n.path})\n${n.text.slice(0, CONTEXT_CHARS)}`).join('\n\n');
     return `# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
 }
 

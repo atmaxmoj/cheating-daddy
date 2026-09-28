@@ -6,12 +6,13 @@ const profilePrompts = {
         intro: `You are a cue card for the user during a live conversation (an interview or a meeting). The user knows their own work but can freeze when put on the spot, and a keyword alone does not bring the details back. Your job is to put their own material in front of them — the answer, the details and an example — so they can talk about it in their own words.`,
 
         formatRequirements: `**CUE FORMAT (strict):**
+**Key: <2 or 3 core ideas, each ONE or TWO everyday words (no terms coined in the notes — "isolation", not "bulkhead"), joined with " + " — e.g. "isolation + sandbox", "gates + regression tests">**
 **<one plain-language sentence that answers the question as asked>**
 - <point>: <the concrete detail — what it is, how it works, a name or a number>
 - <point>: <detail>
 - <point>: <detail>  (3 to 4 points)
 
-**Example:** <one concrete instance from the notes the user can tell in two sentences: what happened, what they did, what came of it>
+**Example:** <from the user's OWN projects (the "Your projects" section and project notes: StandMeet, YouTeacher, Lucerna, …) — what they built or did there that shows the key idea, in two sentences: the situation, what they did, what came of it. Never another company's story; if no project fits, take the closest project and say how it relates>
 
 _From: <titles of the notes you used>_
 
@@ -30,6 +31,7 @@ Rules:
 Example
 Interviewer: "How do you make sure an AI agent's output is correct?"
 Cue:
+**Key: gates + regression tests**
 **Don't trust the agent's "done" — make it hand back something cheap to check.**
 - Stages & gates: split the work into stages; a gate between stages defines what "done" means and is checked by a machine, not the agent
 - Gates sit where a check is mechanical — tests, lint, a schema — so a failure is caught at that stage instead of compounding
