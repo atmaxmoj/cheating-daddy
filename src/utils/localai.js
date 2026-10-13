@@ -31,6 +31,8 @@ let currentCustomPrompt = '';
 // along. Every other profile keeps the fixed prompt built at session start.
 function systemPromptFor(query) {
     if (currentProfile !== 'cues' || !standmeet.isLoaded()) return currentSystemPrompt;
+    const job = standmeet.noticeCompany(query);
+    if (job) sendToRenderer('update-status', `Phone screen: ${job.company}${job.title ? ` — ${job.title}` : ''}`);
     const extra = currentCustomPrompt.trim() ? `\n\n## Also from the user\n${currentCustomPrompt.trim()}` : '';
     return getSystemPrompt('cues', standmeet.contextFor(query) + extra, false);
 }
@@ -519,6 +521,22 @@ async function startLlamaServer(executablePath, modelPath, projectorPath) {
     await waitForServer(`${llamaBaseUrl}/health`, llamaProcess, 30 * 60 * 1000);
 }
 
+const DEFAULT_HOST = 'https://sijie.xyz';
+let preloading = Promise.resolve();
+
+// preloadCorpus — reads the corpus for the saved host + role while the app waits on the start
+// screen, so one key starts a session without the 20 s read. A failure is only logged: the session
+// start reads again and reports it.
+function preloadCorpus() {
+    preloading = (async () => {
+        const prefs = getPreferences();
+        const host = prefs.standmeetHost || DEFAULT_HOST;
+        const role = await findRole(host, prefs.standmeetRoleId);
+        if (standmeet.loadedCount(host, role) === null) await standmeet.loadCorpus(host, role);
+    })().catch(error => console.warn('[LocalAI] corpus preload failed:', error.message));
+    return preloading;
+}
+
 // findRole — the role picked on the start screen; null when none is picked. A picked role that no
 // longer exists is an error, not a silent fall back to the whole corpus.
 async function findRole(host, roleId) {
@@ -546,19 +564,27 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
             throw new Error('Add your DeepSeek API key to use DeepSeek');
         }
 
-        // Cue Cards: read the corpus while Whisper downloads and starts (about 20 s for ~700 notes),
-        // scoped to the StandMeet role chosen for this interview (none = every wiki note).
+        // Cue Cards: the corpus, scoped to the StandMeet role chosen for this interview (none =
+        // every wiki note). The app reads it at launch (preloadCorpus); only a different role reads
+        // again (about 20 s for ~700 notes). The phone screen script and the job briefs are read
+        // fresh every time — a brief written an hour before the call must be there.
         let corpusProgress = '';
         const prefs = getPreferences();
-        const host = prefs.standmeetHost || 'https://sijie.xyz';
+        const host = prefs.standmeetHost || DEFAULT_HOST;
+        await preloading;
         const corpusLoad =
             profile === 'cues'
                 ? findRole(host, prefs.standmeetRoleId)
-                      .then(role =>
-                          standmeet.loadCorpus(host, role, (done, total) => {
-                              corpusProgress = `${done}/${total}`;
-                          }),
-                      )
+                      .then(async role => {
+                          const [count] = await Promise.all([
+                              standmeet.loadedCount(host, role) ??
+                                  standmeet.loadCorpus(host, role, (done, total) => {
+                                      corpusProgress = `${done}/${total}`;
+                                  }),
+                              standmeet.loadScreen(host),
+                          ]);
+                          return count;
+                      })
                       .then(
                           count => ({ count }),
                           error => ({ error }),
@@ -731,6 +757,7 @@ async function sendLocalImage(base64Data, prompt) {
 }
 
 module.exports = {
+    preloadCorpus,
     initializeLocalSession,
     cancelLocalInitialization,
     processLocalAudio,

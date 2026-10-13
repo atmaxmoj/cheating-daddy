@@ -29,6 +29,11 @@ app.whenReady().then(async () => {
     setupGeminiIpcHandlers(geminiSessionRef);
     setupStorageIpcHandlers();
     setupGeneralIpcHandlers();
+
+    // Resident: the installed app starts with the Mac and reads the corpus right away, so a call
+    // needs one key (⌘↩) and no wait. A dev run is not added to the login items.
+    if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true });
+    require('./utils/localai').preloadCorpus();
 });
 
 app.on('window-all-closed', () => {

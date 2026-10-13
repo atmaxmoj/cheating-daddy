@@ -263,10 +263,24 @@ async function listRoles(host) {
 }
 
 let roleBrief = ''; // "this interview is for …", from the chosen role
+let loaded = null; // { key, count }: what the index was built for, so a resident app reuses it
+
+const corpusKey = (host, role) => `${host.replace(/\/$/, '')}|${role ? role.id : ''}`;
+
+// loadedCount — the note count when the index already holds this host + role's notes, else null.
+function loadedCount(host, role) {
+    return loaded && loaded.key === corpusKey(host, role) ? loaded.count : null;
+}
 
 // loadCorpus — reads the notes the role may see (all wiki notes when there is no role) and builds
 // the index. onProgress(done, total) for the status line. Resolves with the note count.
 async function loadCorpus(host, role = null, onProgress = () => {}) {
+    const count = await readCorpus(host, role, onProgress);
+    loaded = { key: corpusKey(host, role), count };
+    return count;
+}
+
+async function readCorpus(host, role, onProgress) {
     const client = createClient(host.replace(/\/$/, ''));
     await client.connect();
     const globs = role ? role.corpus_uris : ['wiki://**'];
@@ -300,6 +314,60 @@ async function loadCorpus(host, role = null, onProgress = () => {}) {
     );
     index = buildIndex(units);
     return usable.length;
+}
+
+// ── phone screen: the owner's fixed script + the job loop's briefs ──
+//
+// The script is the subjectivity note titled "Phone screen" (pay, authorization, notice: the
+// answers every screen asks). Each brief is the picture of a job the owner applied to, kept on its
+// ledger row (jobs.history status applied). Both are read fresh at every session start: a brief
+// written an hour before the call must be there.
+
+const SCRIPT_TITLE = /^phone screen$/i;
+const SCRIPT_CHARS = 4000;
+const BRIEF_CHARS = 4000;
+// Company names drop these before matching what was heard: "Acme Inc." is said "Acme".
+const COMPANY_SUFFIX = /[,.]?\s+(inc|corp|corporation|ltd|limited|llc|co|gmbh|technologies|labs)\.?$/i;
+
+let script = '';
+let jobs = []; // [{ company, name, title, brief }], name = the company as it is said
+let lockedJob = null;
+
+async function loadScreen(host) {
+    const client = createClient(host.replace(/\/$/, ''));
+    await client.connect();
+    const note = (await listAll(client, 'subjectivity')).find(n => SCRIPT_TITLE.test((n.title || '').trim()));
+    const full = note ? await client.tool('corpus.get', { genre: 'subjectivity', id: note.id }) : null;
+    script = full ? cleanBody(full.body).slice(0, SCRIPT_CHARS) : '';
+    const rows = [];
+    let cursor;
+    do {
+        const page = await client.tool('jobs.history', { status: 'applied', limit: PAGE, ...(cursor ? { cursor } : {}) });
+        rows.push(...page.items);
+        cursor = page.next_cursor;
+    } while (cursor);
+    jobs = rows
+        .filter(r => r.brief && r.company)
+        .map(r => ({ company: r.company, name: r.company.replace(COMPANY_SUFFIX, '').trim().toLowerCase(), title: r.title || '', brief: r.brief }));
+    lockedJob = null;
+    return { script: script !== '', briefs: jobs.length };
+}
+
+// noticeCompany — locks the call onto the first applied job whose company was just named; the
+// lock holds for the session. Returns the job when this line made the lock, else null.
+function noticeCompany(text) {
+    if (lockedJob) return null;
+    const said = ` ${(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
+    lockedJob = jobs.find(j => j.name && said.includes(` ${j.name.replace(/[^a-z0-9]+/g, ' ').trim()} `)) || null;
+    return lockedJob;
+}
+
+function screenContext() {
+    const own = script ? `# Your phone screen script\nYour own answers. Use them as given for pay, work authorization, notice and why you are looking.\n${script}\n\n` : '';
+    const job = lockedJob
+        ? `# This call: ${lockedJob.company}${lockedJob.title ? ` — ${lockedJob.title}` : ''}\nYour homework on this job. Lead with it.\n${lockedJob.brief.slice(0, BRIEF_CHARS)}\n\n`
+        : '';
+    return own + job;
 }
 
 // STACK — technology names that turn on the choice matrix when a question names one. Deciding
@@ -371,7 +439,7 @@ function contextFor(query) {
     const notes = picked.map(n => `## ${n.title} (${n.path})\n${n.text.slice(0, CONTEXT_CHARS)}`).join('\n\n');
     const brief = roleBrief ? `# This interview\n${roleBrief}\nLead with what matters for this role.\n\n` : '';
     const matrix = named.length ? MATRIX_ON(named) : MATRIX_OFF;
-    return `${brief}${matrix}\n\n# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
+    return `${screenContext()}${brief}${matrix}\n\n# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
 }
 
 function isLoaded() {
@@ -383,7 +451,21 @@ let vocabulary = '';
 // transcriptionHint — the user's own names (projects and top-level topics) for Whisper's prompt,
 // so "StandMeet" is not heard as "stand meet". '' before loading.
 function transcriptionHint() {
-    return vocabulary;
+    return [vocabulary, ...jobs.map(j => j.company)].filter(Boolean).join(', ');
 }
 
-module.exports = { createClient, loadCorpus, listRoles, contextFor, isLoaded, transcriptionHint, cleanBody, buildIndex, search, uriMatcher };
+module.exports = {
+    createClient,
+    loadCorpus,
+    loadedCount,
+    loadScreen,
+    noticeCompany,
+    listRoles,
+    contextFor,
+    isLoaded,
+    transcriptionHint,
+    cleanBody,
+    buildIndex,
+    search,
+    uriMatcher,
+};
