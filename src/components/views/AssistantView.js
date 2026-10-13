@@ -73,6 +73,9 @@ function closedDiagrams(markdown) {
     return new Set([...markdown.matchAll(MERMAID_FENCE)].map(m => m[1].trim()));
 }
 
+// SPEAKER — whose line it is: the computer's audio is the other side, the microphone is the owner.
+const SPEAKER = { them: 'Them', me: 'Me', typed: 'Me · typed' };
+
 function clock(at) {
     return new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
@@ -179,6 +182,26 @@ export class AssistantView extends LitElement {
 
         .transcript-line:last-child {
             color: var(--text-primary);
+        }
+
+        /* Their lines carry the accent rule; mine sit indented and quieter — kept for review only. */
+        .transcript-line.them {
+            border-left: 2px solid #b5391c;
+            padding-left: 8px;
+        }
+
+        .transcript-line.me,
+        .transcript-line.typed {
+            margin-left: 12px;
+            padding-left: 8px;
+            border-left: 2px solid var(--border-strong, var(--border));
+            font-style: italic;
+        }
+
+        .transcript-who {
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            color: var(--text-secondary);
         }
 
         /* Bold leading letters: the lead carries the weight, the rest of the word stays light. */
@@ -684,8 +707,8 @@ export class AssistantView extends LitElement {
                     ? html`<div class="transcript-empty">What the other side says appears here.</div>`
                     : transcriptLines.map(
                           line => html`
-                              <div class="transcript-line">
-                                  <span class="transcript-meta">${clock(line.at)}${line.source === 'typed' ? ' · typed' : ''}</span>
+                              <div class="transcript-line ${line.source}">
+                                  <span class="transcript-meta"><b class="transcript-who">${SPEAKER[line.source] || 'Them'}</b> · ${clock(line.at)}</span>
                                   ${line.text.split(/(\s+)/).map(word => {
                                       const [before, lead, rest] = leadSplit(word);
                                       return lead ? html`${before}<b class="lead">${lead}</b>${rest}` : word;

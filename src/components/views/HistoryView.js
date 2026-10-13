@@ -192,6 +192,30 @@ export class HistoryView extends LitElement {
                 opacity: 0.5;
             }
 
+            /* Transcript: both sides of the call, theirs on the accent rule, mine indented. */
+            .transcript-row {
+                display: grid;
+                grid-template-columns: 48px 1fr auto;
+                gap: var(--space-sm);
+                padding: 6px 8px;
+                border-left: 2px solid #b5391c;
+                margin-bottom: 4px;
+            }
+
+            .transcript-row.me,
+            .transcript-row.typed {
+                margin-left: 16px;
+                border-left-color: var(--border-strong, var(--border));
+                font-style: italic;
+            }
+
+            .transcript-who {
+                font-family: var(--font-mono);
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--text-secondary);
+            }
+
             .message-row.user .message {
                 background: var(--accent);
                 color: var(--bg-app);
@@ -397,6 +421,18 @@ export class HistoryView extends LitElement {
             `);
         }
 
+        if (this.activeTab === 'transcript') {
+            const lines = this.selectedSession.transcript || [];
+            if (!lines.length) return html`<div class="empty">No transcript for this session.</div>`;
+            return lines.map(line => html`
+                <div class="transcript-row ${line.source}">
+                    <span class="transcript-who">${line.source === 'them' ? 'Them' : 'Me'}</span>
+                    <span class="transcript-text">${line.text}</span>
+                    <span class="message-meta">${this.formatTime(line.at)}</span>
+                </div>
+            `);
+        }
+
         if (this.activeTab === 'screen') {
             const screen = this.selectedSession.screenAnalysisHistory || [];
             if (!screen.length) return html`<div class="empty">No screen analysis data.</div>`;
@@ -484,6 +520,9 @@ export class HistoryView extends LitElement {
             <div class="tab-row">
                 <button class="tab-btn ${this.activeTab === 'conversation' ? 'active' : ''}" @click=${() => { this.activeTab = 'conversation'; }}>
                     Conversation (${conversationCount})
+                </button>
+                <button class="tab-btn ${this.activeTab === 'transcript' ? 'active' : ''}" @click=${() => { this.activeTab = 'transcript'; }}>
+                    Transcript (${this.selectedSession?.transcript?.length || 0})
                 </button>
                 <button class="tab-btn ${this.activeTab === 'screen' ? 'active' : ''}" @click=${() => { this.activeTab = 'screen'; }}>
                     Screen (${screenCount})

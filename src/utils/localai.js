@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getSystemPrompt } = require('./prompts');
-const { sendToRenderer, initializeNewSession, saveConversationTurn } = require('./gemini');
+const { sendToRenderer, initializeNewSession, saveConversationTurn, saveTranscriptLine } = require('./gemini');
 const { publishTranscript, publishCue, newCueID } = require('./feed');
 const standmeet = require('./standmeet');
 const { getCredentials, getPreferences } = require('../storage');
@@ -40,12 +40,22 @@ let isLocalActive = false;
 let initializationController = null;
 let llamaCacheSnapshot = new Set();
 
-let isSpeaking = false;
-let speechBuffers = [];
-let silenceFrameCount = 0;
-let speechFrameCount = 0;
-let voicedFrameCount = 0; // loud frames in the current turn (the buffer also holds its silences)
+// Two streams, each with its own voice detection: "them" is the computer's audio (the other side —
+// transcribed, then cued), "me" is the microphone (the owner — transcribed for the record only).
+// Mixing them into one detector let the owner's voice cut the other side's question.
+function newStream() {
+    return {
+        isSpeaking: false,
+        speechBuffers: [],
+        silenceFrameCount: 0,
+        speechFrameCount: 0,
+        voicedFrameCount: 0, // loud frames in the current turn (the buffer also holds its silences)
+        resampleRemainder: Buffer.alloc(0),
+    };
+}
+let streams = { them: newStream(), me: newStream() };
 const MIN_VOICED_FRAMES = 5; // ~0.5 s of actual speech before a turn is worth transcribing
+let whisperQueue = Promise.resolve(); // one Whisper server, one request at a time
 
 // Whisper writes these for audio without words ("[BLANK_AUDIO]", "(coughs)", "[Music]").
 const NON_SPEECH = /^[\s[(*].*[\])*]\s*$/;
@@ -89,10 +99,8 @@ async function requestDeepSeek(messages, onText) {
     }
     return readStreamingResponse(response, onText);
 }
-let resampleRemainder = Buffer.alloc(0);
-
-function resample24kTo16k(inputBuffer) {
-    const combined = Buffer.concat([resampleRemainder, inputBuffer]);
+function resample24kTo16k(stream, inputBuffer) {
+    const combined = Buffer.concat([stream.resampleRemainder, inputBuffer]);
     const inputSamples = Math.floor(combined.length / 2);
     const outputSamples = Math.floor((inputSamples * 2) / 3);
     const outputBuffer = Buffer.alloc(outputSamples * 2);
@@ -109,7 +117,7 @@ function resample24kTo16k(inputBuffer) {
 
     const consumedInputSamples = Math.ceil((outputSamples * 3) / 2);
     const remainderStart = consumedInputSamples * 2;
-    resampleRemainder = remainderStart < combined.length ? combined.slice(remainderStart) : Buffer.alloc(0);
+    stream.resampleRemainder = remainderStart < combined.length ? combined.slice(remainderStart) : Buffer.alloc(0);
 
     return outputBuffer;
 }
@@ -129,59 +137,55 @@ function calculateRms(pcm16Buffer) {
 
 // Audio level, logged every 5 s: "is sound reaching the assistant at all" is the first question
 // when no cue appears, and the answer should not need a debugger.
-let levelPeak = 0;
-let levelLoggedAt = 0;
-
-function logLevel(rms) {
-    levelPeak = Math.max(levelPeak, rms);
+// Per stream: "is the microphone reaching it" is a separate question from the computer audio.
+function logLevel(source, s, rms) {
+    s.levelPeak = Math.max(s.levelPeak || 0, rms);
     const now = Date.now();
-    if (now - levelLoggedAt < 5000) return;
-    console.log(`[LocalAI] audio level peak ${levelPeak.toFixed(4)} (speech threshold ${vadConfig.energyThreshold})`);
-    levelPeak = 0;
-    levelLoggedAt = now;
+    if (now - (s.levelLoggedAt || 0) < 5000) return;
+    console.log(`[LocalAI] ${source} audio level peak ${s.levelPeak.toFixed(4)} (speech threshold ${vadConfig.energyThreshold})`);
+    s.levelPeak = 0;
+    s.levelLoggedAt = now;
 }
 
-function processVad(pcm16kBuffer) {
+function processVad(source, s, pcm16kBuffer) {
     const rms = calculateRms(pcm16kBuffer);
-    logLevel(rms);
+    logLevel(source, s, rms);
     const isVoice = rms > vadConfig.energyThreshold;
 
     if (isVoice) {
-        speechFrameCount += 1;
-        silenceFrameCount = 0;
-        if (isSpeaking) voicedFrameCount += 1;
+        s.speechFrameCount += 1;
+        s.silenceFrameCount = 0;
+        if (s.isSpeaking) s.voicedFrameCount += 1;
 
-        if (!isSpeaking && speechFrameCount >= vadConfig.speechFramesRequired) {
-            isSpeaking = true;
-            speechBuffers = [];
-            voicedFrameCount = 1;
-            console.log('[LocalAI] Speech started (RMS:', rms.toFixed(4), ')');
-            sendToRenderer('update-status', 'Listening... (speech detected)');
+        if (!s.isSpeaking && s.speechFrameCount >= vadConfig.speechFramesRequired) {
+            s.isSpeaking = true;
+            s.speechBuffers = [];
+            s.voicedFrameCount = 1;
+            console.log(`[LocalAI] Speech started (${source}, RMS:`, rms.toFixed(4), ')');
+            if (source === 'them') sendToRenderer('update-status', 'Listening... (speech detected)');
         }
     } else {
-        silenceFrameCount += 1;
-        speechFrameCount = 0;
+        s.silenceFrameCount += 1;
+        s.speechFrameCount = 0;
 
-        if (isSpeaking && silenceFrameCount >= vadConfig.silenceFramesRequired) {
-            isSpeaking = false;
-            const audioData = Buffer.concat(speechBuffers);
-            speechBuffers = [];
+        if (s.isSpeaking && s.silenceFrameCount >= vadConfig.silenceFramesRequired) {
+            s.isSpeaking = false;
+            const audioData = Buffer.concat(s.speechBuffers);
+            s.speechBuffers = [];
             // The buffer also holds the silence that ended the turn, so its length says nothing
             // about how much was said: a cough plus 1.5 s of quiet looked like a question.
-            if (voicedFrameCount < MIN_VOICED_FRAMES) {
-                console.log('[LocalAI] Too little speech, skipping (', voicedFrameCount, 'voiced frames )');
-                sendToRenderer('update-status', 'Listening...');
+            if (s.voicedFrameCount < MIN_VOICED_FRAMES) {
+                console.log(`[LocalAI] Too little speech (${source}), skipping (`, s.voicedFrameCount, 'voiced frames )');
                 return;
             }
-            console.log('[LocalAI] Speech ended, accumulated', audioData.length, 'bytes');
-            sendToRenderer('update-status', 'Transcribing...');
-            handleSpeechEnd(audioData);
+            console.log(`[LocalAI] Speech ended (${source}), accumulated`, audioData.length, 'bytes');
+            handleSpeechEnd(source, audioData);
             return;
         }
     }
 
-    if (isSpeaking) {
-        speechBuffers.push(Buffer.from(pcm16kBuffer));
+    if (s.isSpeaking) {
+        s.speechBuffers.push(Buffer.from(pcm16kBuffer));
     }
 }
 
@@ -236,26 +240,34 @@ async function transcribeAudio(pcm16kBuffer) {
     return text;
 }
 
-async function handleSpeechEnd(audioData) {
+// handleSpeechEnd — transcribes one turn. Both sides go into the transcript; only the other side's
+// turn goes on to the model, the cue and the phone feed. The owner's own words are kept for review.
+async function handleSpeechEnd(source, audioData) {
     if (!isLocalActive) return;
 
     if (audioData.length < 16000) {
-        console.log('[LocalAI] Audio too short, skipping');
-        sendToRenderer('update-status', 'Listening...');
+        console.log(`[LocalAI] Audio too short (${source}), skipping`);
         return;
     }
 
     try {
-        const transcription = await transcribeAudio(audioData);
+        if (source === 'them') sendToRenderer('update-status', 'Transcribing...');
+        const transcribed = whisperQueue.then(() => transcribeAudio(audioData));
+        whisperQueue = transcribed.catch(() => {});
+        const transcription = await transcribed;
 
         if (!transcription || transcription.length < 2 || NON_SPEECH.test(transcription)) {
-            console.log('[LocalAI] Empty transcription, skipping');
-            sendToRenderer('update-status', 'Listening...');
+            console.log(`[LocalAI] Empty transcription (${source}), skipping`);
+            if (source === 'them') sendToRenderer('update-status', 'Listening...');
             return;
         }
 
+        const line = { text: transcription, source, at: Date.now() };
+        sendToRenderer('transcript-line', line);
+        saveTranscriptLine(line);
+        if (source === 'me') return;
+
         sendToRenderer('update-status', 'Generating response...');
-        sendToRenderer('transcript-line', { text: transcription, source: 'heard', at: Date.now() });
         publishTranscript(transcription);
         await sendToLlama(transcription);
     } catch (error) {
@@ -610,11 +622,7 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
             await startLlamaServer(nativeFiles.llamaBinaryPath, nativeFiles.llamaModelPath, nativeFiles.projectorPath);
         }
 
-        isSpeaking = false;
-        speechBuffers = [];
-        silenceFrameCount = 0;
-        speechFrameCount = 0;
-        resampleRemainder = Buffer.alloc(0);
+        streams = { them: newStream(), me: newStream() };
         localConversationHistory = [];
 
         initializeNewSession(profile, customPrompt);
@@ -643,12 +651,15 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
     }
 }
 
-function processLocalAudio(monoChunk24k) {
+// processLocalAudio — one 24 kHz mono chunk from a stream: 'them' (computer audio, the default) or
+// 'me' (the microphone).
+function processLocalAudio(monoChunk24k, source = 'them') {
     if (!isLocalActive) return;
 
-    const pcm16k = resample24kTo16k(monoChunk24k);
+    const stream = streams[source];
+    const pcm16k = resample24kTo16k(stream, monoChunk24k);
     if (pcm16k.length > 0) {
-        processVad(pcm16k);
+        processVad(source, stream, pcm16k);
     }
 }
 
@@ -663,11 +674,7 @@ function closeLocalSession() {
     llamaBaseUrl = null;
     whisperBaseUrl = null;
     llamaModel = null;
-    isSpeaking = false;
-    speechBuffers = [];
-    silenceFrameCount = 0;
-    speechFrameCount = 0;
-    resampleRemainder = Buffer.alloc(0);
+    streams = { them: newStream(), me: newStream() };
     localConversationHistory = [];
     currentSystemPrompt = null;
 }
@@ -697,7 +704,9 @@ async function sendLocalText(text) {
     }
 
     try {
-        sendToRenderer('transcript-line', { text, source: 'typed', at: Date.now() });
+        const line = { text, source: 'typed', at: Date.now() };
+        sendToRenderer('transcript-line', line);
+        saveTranscriptLine(line);
         await sendToLlama(text);
         return { success: true };
     } catch (error) {

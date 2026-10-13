@@ -739,6 +739,15 @@ ipcRenderer.on('save-conversation-turn', async (event, data) => {
     }
 });
 
+// Both sides of the call, labelled, kept with the session for review (History → Transcript).
+ipcRenderer.on('save-transcript', async (event, data) => {
+    try {
+        await storage.saveSession(data.sessionId, { transcript: data.transcript });
+    } catch (error) {
+        console.error('Error saving transcript:', error);
+    }
+});
+
 // Listen for session context (profile info) when session starts
 ipcRenderer.on('save-session-context', async (event, data) => {
     try {

@@ -35,11 +35,12 @@ function freshHome(standmeetUrl) {
 }
 
 // launchApp — the app on a fresh HOME; resolves with the Electron app, its first window and config dir.
-async function launchApp(t, standmeetUrl) {
+// chromiumFlags: Chromium switches for this launch only (e.g. a fake microphone playing a file).
+async function launchApp(t, standmeetUrl, chromiumFlags = []) {
     const { home, config, creds } = freshHome(standmeetUrl);
     const app = await electron.launch({
         executablePath: require('../../node_modules/electron/index.js'),
-        args: [ROOT],
+        args: [ROOT, ...chromiumFlags],
         env: { ...process.env, HOME: home, STANDMEET_CREDS_PATH: creds },
         timeout: 30_000,
     });
@@ -49,6 +50,7 @@ async function launchApp(t, standmeetUrl) {
     app.process().stdout.pipe(log);
     app.process().stderr.pipe(log);
     const win = await app.firstWindow();
+    win.on('console', m => log.write(`[renderer] ${m.text()}\n`));
     await win.waitForLoadState('domcontentloaded');
     return { app, win, config };
 }

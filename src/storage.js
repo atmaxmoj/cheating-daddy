@@ -29,7 +29,7 @@ const DEFAULT_PREFERENCES = {
     selectedScreenshotInterval: '5',
     selectedImageQuality: 'medium',
     advancedMode: false,
-    audioMode: 'speaker_only',
+    audioMode: 'both', // computer audio is cued; the microphone is transcript-only
     fontSize: 'medium',
     backgroundTransparency: 0.8,
     googleSearchEnabled: false,
@@ -411,6 +411,8 @@ function saveSession(sessionId, data) {
         // Conversation data
         conversationHistory: data.conversationHistory || existingSession?.conversationHistory || [],
         screenAnalysisHistory: data.screenAnalysisHistory || existingSession?.screenAnalysisHistory || [],
+        // Both sides of the call, labelled: [{ at, source: 'them' | 'me' | 'typed', text }]
+        transcript: data.transcript || existingSession?.transcript || [],
     };
     return writeJsonFile(sessionPath, sessionData);
 }

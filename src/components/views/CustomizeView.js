@@ -9,6 +9,12 @@ export class CustomizeView extends LitElement {
                 border-color: var(--danger);
             }
 
+            .form-hint {
+                font-size: 12px;
+                color: var(--text-secondary);
+                line-height: 1.4;
+            }
+
             .warning-callout {
                 position: relative;
                 margin-top: 4px;
@@ -213,7 +219,7 @@ export class CustomizeView extends LitElement {
         this.clearStatusType = '';
         this.backgroundTransparency = 0.8;
         this.fontSize = 20;
-        this.audioMode = 'speaker_only';
+        this.audioMode = 'both';
         this.customPrompt = '';
         this.theme = 'dark';
         this._loadFromStorage();
@@ -229,7 +235,7 @@ export class CustomizeView extends LitElement {
             this.googleSearchEnabled = prefs.googleSearchEnabled ?? true;
             this.backgroundTransparency = prefs.backgroundTransparency ?? 0.8;
             this.fontSize = prefs.fontSize ?? 20;
-            this.audioMode = prefs.audioMode ?? 'speaker_only';
+            this.audioMode = prefs.audioMode ?? 'both';
             this.customPrompt = prefs.customPrompt ?? '';
             this.theme = prefs.theme ?? 'dark';
             if (keybinds) {
@@ -486,7 +492,7 @@ export class CustomizeView extends LitElement {
                 selectedLanguage: 'en-US',
                 selectedScreenshotInterval: '5',
                 selectedImageQuality: 'medium',
-                audioMode: 'speaker_only',
+                audioMode: 'both',
                 fontSize: 20,
                 backgroundTransparency: 0.8,
                 googleSearchEnabled: false,
@@ -576,14 +582,11 @@ export class CustomizeView extends LitElement {
                     <div class="form-group">
                         <label class="form-label">Audio Mode</label>
                         <select class="control" .value=${this.audioMode} @change=${this.handleAudioModeSelect}>
-                            <option value="speaker_only">Speaker Only (Interviewer)</option>
-                            <option value="mic_only">Microphone Only (Me)</option>
-                            <option value="both">Both Speaker and Microphone</option>
+                            <option value="both">Computer audio + my microphone</option>
+                            <option value="speaker_only">Computer audio only</option>
                         </select>
                     </div>
-                    ${this.audioMode !== 'speaker_only' ? html`
-                        <div class="warning-callout">May cause unexpected behavior. Only change this if you know what you're doing.</div>
-                    ` : ''}
+                    <div class="form-hint">Computer audio (the other side) gets cue cards. Your microphone only goes into the transcript, for review. Use headphones so the microphone hears only you.</div>
                     <div class="form-group">
                         <label class="form-label">Image Quality</label>
                         <select class="control" .value=${this.selectedImageQuality} @change=${this.handleImageQualitySelect}>

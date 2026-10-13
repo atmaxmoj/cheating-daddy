@@ -24,6 +24,7 @@ let groqConversationHistory = [];
 let currentSessionId = null;
 let currentTranscription = '';
 let conversationHistory = [];
+let transcript = [];
 let screenAnalysisHistory = [];
 let currentProfile = null;
 let currentCustomPrompt = null;
@@ -86,6 +87,7 @@ function initializeNewSession(profile = null, customPrompt = null) {
     groqRequestStartedForTurn = false;
     conversationHistory = [];
     screenAnalysisHistory = [];
+    transcript = [];
     groqConversationHistory = [];
     currentProfile = profile;
     currentCustomPrompt = customPrompt;
@@ -121,6 +123,16 @@ function saveConversationTurn(transcription, aiResponse) {
         turn: conversationTurn,
         fullHistory: conversationHistory,
     });
+}
+
+// saveTranscriptLine — both sides of the call, in order, kept with the session for review:
+// { at, source: 'them' | 'me' | 'typed', text }.
+function saveTranscriptLine(line) {
+    if (!currentSessionId) {
+        initializeNewSession();
+    }
+    transcript.push(line);
+    sendToRenderer('save-transcript', { sessionId: currentSessionId, transcript });
 }
 
 function saveScreenAnalysis(prompt, response, model) {
@@ -1171,7 +1183,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         if (currentProviderMode === 'local') {
             try {
                 const pcmBuffer = Buffer.from(data, 'base64');
-                getLocalAi().processLocalAudio(pcmBuffer);
+                getLocalAi().processLocalAudio(pcmBuffer, 'me');
                 return { success: true };
             } catch (error) {
                 console.error('Error sending local mic audio:', error);
@@ -1376,6 +1388,7 @@ module.exports = {
     sendToRenderer,
     initializeNewSession,
     saveConversationTurn,
+    saveTranscriptLine,
     getCurrentSessionData,
     killExistingSystemAudioDump,
     startMacOSAudioCapture,
