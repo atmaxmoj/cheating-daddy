@@ -1,4 +1,5 @@
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import './IPhoneCalls.js';
 
 const LOCAL_LLM_PRESETS = [
     { value: 'deepseek:deepseek-flash', label: 'DeepSeek V4.1 Flash — API · Fastest, no download' },
@@ -1390,7 +1391,9 @@ export class MainView extends LitElement {
                 </div>
             </details>
 
-            ${this._renderStartButton()} ${this._renderDivider()}
+            ${this._renderStartButton()}
+            <iphone-calls></iphone-calls>
+            ${this._renderDivider()}
 
             <!-- Cloud promo intentionally removed from the active UI. -->
 

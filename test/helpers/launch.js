@@ -34,13 +34,46 @@ function freshHome(standmeetUrl) {
     return { home, config, creds };
 }
 
+// fakeMic — Chromium's fake capture device playing `wav`. The audio service runs in-process: the
+// sandboxed one cannot open the file and plays silence.
+function fakeMic(wav) {
+    return [
+        '--use-fake-device-for-media-stream',
+        '--use-fake-ui-for-media-stream',
+        '--disable-features=AudioServiceOutOfProcess',
+        `--use-file-for-fake-audio-capture=${wav}`,
+    ];
+}
+
+// silentWav — one second of 16 kHz silence: the microphone of a spec that does not test it. The
+// real microphone would hear `say` from the speakers and add "Me" turns the spec does not expect.
+function silentWav() {
+    const wav = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cue-quiet-')), 'quiet.wav');
+    const data = Buffer.alloc(32000);
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + data.length, 4);
+    header.write('WAVEfmt ', 8);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20); // PCM
+    header.writeUInt16LE(1, 22); // mono
+    header.writeUInt32LE(16000, 24);
+    header.writeUInt32LE(32000, 28);
+    header.writeUInt16LE(2, 32);
+    header.writeUInt16LE(16, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(data.length, 40);
+    fs.writeFileSync(wav, Buffer.concat([header, data]));
+    return wav;
+}
+
 // launchApp — the app on a fresh HOME; resolves with the Electron app, its first window and config dir.
-// chromiumFlags: Chromium switches for this launch only (e.g. a fake microphone playing a file).
-async function launchApp(t, standmeetUrl, chromiumFlags = []) {
+// micWav: what the microphone hears (default: silence).
+async function launchApp(t, standmeetUrl, micWav = silentWav()) {
     const { home, config, creds } = freshHome(standmeetUrl);
     const app = await electron.launch({
         executablePath: require('../../node_modules/electron/index.js'),
-        args: [ROOT, ...chromiumFlags],
+        args: [ROOT, ...fakeMic(micWav)],
         env: { ...process.env, HOME: home, STANDMEET_CREDS_PATH: creds },
         timeout: 30_000,
     });

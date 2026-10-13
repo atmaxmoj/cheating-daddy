@@ -48,13 +48,7 @@ function micFile() {
 test('two tracks', async t => {
     const standmeet = await startStandMeet();
     t.after(standmeet.close);
-    const { win, config } = await launchApp(t, standmeet.url, [
-        '--use-fake-device-for-media-stream',
-        '--use-fake-ui-for-media-stream',
-        // the sandboxed audio service cannot open the file and plays silence; run it in-process
-        '--disable-features=AudioServiceOutOfProcess',
-        `--use-file-for-fake-audio-capture=${micFile()}%noloop`,
-    ]);
+    const { win, config } = await launchApp(t, standmeet.url, `${micFile()}%noloop`);
     const meLine = win.locator('.transcript-line.me');
     const themLine = win.locator('.transcript-line.them');
 

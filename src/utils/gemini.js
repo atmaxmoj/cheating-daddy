@@ -913,7 +913,7 @@ async function startMacOSAudioCapture(geminiSessionRef) {
     }
 
     console.log('SystemAudioDump started with PID:', systemAudioProc.pid);
-    startCallState(app.isPackaged ? path.join(process.resourcesPath, 'CallState') : path.join(__dirname, '../assets', 'CallState'));
+    startCallState(callStateBinary());
 
     const CHUNK_DURATION = 0.1;
     const SAMPLE_RATE = 24000;
@@ -986,6 +986,26 @@ function convertStereoToMono(stereoBuffer) {
 // answered here, or FaceTime — so the assistant view can say what it is listening to. Lines are
 // "phone" or "computer"; it only reports, the audio capture is the same either way.
 let callStateProc = null;
+
+function callStateBinary() {
+    const { app } = require('electron');
+    const path = require('path');
+    return app.isPackaged ? path.join(process.resourcesPath, 'CallState') : path.join(__dirname, '../assets', 'CallState');
+}
+
+// readCallState — one reading for the start screen: the helper prints the current state first.
+function readCallState() {
+    return new Promise(resolve => {
+        const proc = spawn(callStateBinary(), [], { stdio: ['ignore', 'pipe', 'ignore'] });
+        const done = state => {
+            proc.kill('SIGTERM');
+            resolve(state);
+        };
+        proc.stdout.once('data', data => done(data.toString().split('\n')[0].trim()));
+        proc.on('error', () => resolve('unknown'));
+        setTimeout(() => done('unknown'), 3000);
+    });
+}
 
 function startCallState(binary) {
     stopCallState();
@@ -1300,6 +1320,8 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
             return { success: false, error: error.message };
         }
     });
+
+    ipcMain.handle('call-state', () => (process.platform === 'darwin' ? readCallState() : 'unknown'));
 
     ipcMain.handle('stop-macos-audio', async event => {
         try {

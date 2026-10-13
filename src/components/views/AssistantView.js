@@ -1,4 +1,5 @@
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import './IPhoneCalls.js';
 
 // transcriptLines — what the assistant heard (and what the user typed) this session, oldest first.
 // Module-level so it survives the view being re-created when the user navigates away and back.
@@ -100,6 +101,28 @@ export class AssistantView extends LitElement {
             letter-spacing: 0.06em;
             text-transform: uppercase;
             color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-subtle, var(--border));
+            background: var(--bg-app);
+        }
+
+        .indicator-help {
+            margin-left: auto;
+            border: none;
+            background: none;
+            padding: 0;
+            font: inherit;
+            letter-spacing: inherit;
+            text-transform: inherit;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        .indicator-help:hover {
+            color: var(--text-primary);
+        }
+
+        .iphone-calls-slot {
+            padding: var(--space-sm) var(--space-md);
             border-bottom: 1px solid var(--border-subtle, var(--border));
             background: var(--bg-app);
         }
@@ -518,6 +541,7 @@ export class AssistantView extends LitElement {
         shouldAnimateResponse: { type: Boolean },
         isAnalyzing: { type: Boolean, state: true },
         listeningSource: { type: String, state: true }, // 'computer' | 'phone', from the CallState helper
+        showIPhoneCalls: { type: Boolean, state: true }, // the "how an iPhone call reaches here" panel
     };
 
     constructor() {
@@ -953,7 +977,11 @@ export class AssistantView extends LitElement {
             <div class="listening-indicator" role="status">
                 <span class="listening-dot"></span>
                 Listening: ${this.listeningSource === 'phone' ? 'phone call' : 'computer audio'}
+                <button class="indicator-help" @click=${() => (this.showIPhoneCalls = !this.showIPhoneCalls)}>
+                    iPhone calls ${this.showIPhoneCalls ? '▾' : '▸'}
+                </button>
             </div>
+            ${this.showIPhoneCalls ? html`<div class="iphone-calls-slot"><iphone-calls listening></iphone-calls></div>` : ''}
             <div class="main">
                 <div class="response-container" id="responseContainer"></div>
                 ${this.renderTranscript()}
