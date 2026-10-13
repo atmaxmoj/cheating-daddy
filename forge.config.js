@@ -4,7 +4,7 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
     packagerConfig: {
         asar: true,
-        extraResource: ['./src/assets/SystemAudioDump'],
+        extraResource: ['./src/assets/SystemAudioDump', './src/assets/CallState'],
         name: 'Screen Assistant', // StandMeet's build, modified from Cheating Daddy (credited in the app)
         icon: 'src/assets/logo',
         // use `security find-identity -v -p codesigning` to find your identity

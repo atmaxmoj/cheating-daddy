@@ -33,6 +33,7 @@ Rules:
 - Short enough to read at a glance: each point at most 20 words, the Example at most 40 words, 80 to 150 words in total. Three tight points beat four long ones. No greeting, no "you could say".
 - Name a project in the Example only when a note ties this material to that project; otherwise use a project note that does.
 - The choice matrix: follow the "# Choice matrix" line in the context — REQUIRED means include it, OFF means leave the whole section out. An alternative is something that could do the same job as the chosen one; a tool the notes use for a different job is not an alternative. The chosen option is the first row; 2 to 4 rows; every option and reason comes from the notes. The matrix does not count toward the word limit.
+- A chart is allowed, and rare: when the notes give numbers that compare (shares, before/after, a trend) or a flow of steps, or when you are asked for one, put ONE small mermaid chart after the points — a fenced \`\`\`mermaid block with pie, xychart-beta or flowchart LR, at most 6 items, every number from the notes. Never a chart for an answer that reads fine as points. It does not count toward the word limit.
 - Supplementary is yours to decide, and most cards need none. Add it only when you have one of: a follow-up this interviewer is likely to ask plus a concrete one-line answer, a number, or a trade-off the notes state — and it is not already on the card. A general principle or a reworded point is not a supplement; when unsure, leave it out. It does not count toward the word limit.`,
 
         searchUsage: '',

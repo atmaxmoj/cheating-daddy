@@ -15,6 +15,64 @@ function leadSplit(word) {
     return [m[1], core.slice(0, n), core.slice(n) + m[3]];
 }
 
+// ── Charts: a ```mermaid fence in a card becomes a diagram ──
+//
+// Only a closed fence is drawn — a card still streaming shows its code. A diagram that does not
+// parse stays code: the card never shows mermaid's error text. Each source renders once; the card
+// re-renders on every streamed token and reuses the SVG.
+
+const MERMAID_FENCE = /```mermaid\n([\s\S]*?)\n```/g;
+const diagrams = new Map(); // source → Promise<svg string | null>
+let diagramSeq = 0;
+let mermaidReady = false;
+
+function diagramFor(source) {
+    if (!diagrams.has(source)) diagrams.set(source, drawDiagram(source));
+    return diagrams.get(source);
+}
+
+async function drawDiagram(source) {
+    const mermaid = window.mermaid;
+    if (!mermaid) return null;
+    if (!mermaidReady) {
+        mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'strict',
+            suppressErrorRendering: true,
+            theme: 'base',
+            // paper / ink: the StandMeet palette
+            themeVariables: {
+                fontFamily: 'JetBrains Mono, monospace',
+                background: '#F3EFE6',
+                primaryColor: '#F3EFE6',
+                primaryTextColor: '#1B1814',
+                primaryBorderColor: '#1B1814',
+                lineColor: '#1B1814',
+                pie1: '#B5391C',
+                pie2: '#1B1814',
+                pie3: '#7A7167',
+                pie4: '#DCD3BF',
+                pie5: '#D14E2E',
+                pieStrokeColor: '#F3EFE6',
+                pieOuterStrokeColor: '#1B1814',
+                pieOpacity: '1',
+            },
+        });
+        mermaidReady = true;
+    }
+    try {
+        if (!(await mermaid.parse(source, { suppressErrors: true }))) return null;
+        const { svg } = await mermaid.render(`cue-diagram-${++diagramSeq}`, source);
+        return svg;
+    } catch {
+        return null;
+    }
+}
+
+function closedDiagrams(markdown) {
+    return new Set([...markdown.matchAll(MERMAID_FENCE)].map(m => m[1].trim()));
+}
+
 function clock(at) {
     return new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
@@ -25,6 +83,52 @@ export class AssistantView extends LitElement {
             height: 100%;
             display: flex;
             flex-direction: column;
+        }
+
+        /* ── What is being heard: computer audio or a phone call ── */
+
+        .listening-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px var(--space-md);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-subtle, var(--border));
+            background: var(--bg-app);
+        }
+
+        .listening-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #b5391c;
+            animation: listening-pulse 1.6s ease-in-out infinite;
+        }
+
+        @keyframes listening-pulse {
+            0%,
+            100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* ── Charts ── */
+
+        .response-container .cue-diagram {
+            margin: var(--space-sm) 0;
+        }
+
+        .response-container .cue-diagram svg {
+            max-width: 100%;
+            height: auto;
+            max-height: 260px;
         }
 
         /* ── Cue + transcript side by side ── */
@@ -390,6 +494,7 @@ export class AssistantView extends LitElement {
         onSendText: { type: Function },
         shouldAnimateResponse: { type: Boolean },
         isAnalyzing: { type: Boolean, state: true },
+        listeningSource: { type: String, state: true }, // 'computer' | 'phone', from the CallState helper
     };
 
     constructor() {
@@ -399,6 +504,7 @@ export class AssistantView extends LitElement {
         this.selectedProfile = 'interview';
         this.onSendText = () => {};
         this.isAnalyzing = false;
+        this.listeningSource = 'computer';
         this._animFrame = null;
     }
 
@@ -536,6 +642,10 @@ export class AssistantView extends LitElement {
                 this.requestUpdate();
             };
 
+            this.handleListeningSource = (_event, source) => {
+                this.listeningSource = source;
+            };
+            ipcRenderer.on('listening-source', this.handleListeningSource);
             ipcRenderer.on('transcript-line', this.handleTranscriptLine);
             ipcRenderer.on('session-initializing', this.handleSessionInitializing);
             ipcRenderer.on('navigate-previous-response', this.handlePreviousResponse);
@@ -556,6 +666,7 @@ export class AssistantView extends LitElement {
             if (this.handleScrollUp) ipcRenderer.removeListener('scroll-response-up', this.handleScrollUp);
             if (this.handleScrollDown) ipcRenderer.removeListener('scroll-response-down', this.handleScrollDown);
             if (this.handleTranscriptLine) ipcRenderer.removeListener('transcript-line', this.handleTranscriptLine);
+            if (this.handleListeningSource) ipcRenderer.removeListener('listening-source', this.handleListeningSource);
             if (this.handleSessionInitializing) ipcRenderer.removeListener('session-initializing', this.handleSessionInitializing);
         }
     }
@@ -789,9 +900,26 @@ export class AssistantView extends LitElement {
             const currentResponse = this.getCurrentResponse();
             const renderedResponse = this.renderMarkdown(currentResponse);
             container.innerHTML = renderedResponse;
+            this.drawDiagrams(container, currentResponse);
             if (this.shouldAnimateResponse) {
                 this.dispatchEvent(new CustomEvent('response-animation-complete', { bubbles: true, composed: true }));
             }
+        }
+    }
+
+    // drawDiagrams — swaps each closed mermaid code block in the card for its diagram.
+    drawDiagrams(container, markdown) {
+        const closed = closedDiagrams(markdown);
+        for (const code of container.querySelectorAll('code.language-mermaid')) {
+            const source = code.textContent.trim();
+            if (!closed.has(source)) continue;
+            diagramFor(source).then(svg => {
+                if (!svg || !code.isConnected) return;
+                const figure = document.createElement('figure');
+                figure.className = 'cue-diagram';
+                figure.innerHTML = svg;
+                code.closest('pre').replaceWith(figure);
+            });
         }
     }
 
@@ -799,6 +927,10 @@ export class AssistantView extends LitElement {
         const hasMultipleResponses = this.responses.length > 1;
 
         return html`
+            <div class="listening-indicator" role="status">
+                <span class="listening-dot"></span>
+                Listening: ${this.listeningSource === 'phone' ? 'phone call' : 'computer audio'}
+            </div>
             <div class="main">
                 <div class="response-container" id="responseContainer"></div>
                 ${this.renderTranscript()}

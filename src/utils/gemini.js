@@ -901,6 +901,7 @@ async function startMacOSAudioCapture(geminiSessionRef) {
     }
 
     console.log('SystemAudioDump started with PID:', systemAudioProc.pid);
+    startCallState(app.isPackaged ? path.join(process.resourcesPath, 'CallState') : path.join(__dirname, '../assets', 'CallState'));
 
     const CHUNK_DURATION = 0.1;
     const SAMPLE_RATE = 24000;
@@ -969,7 +970,29 @@ function convertStereoToMono(stereoBuffer) {
     return monoBuffer;
 }
 
+// CallState (native/call-state.swift) says whether a call runs on this Mac — an iPhone call
+// answered here, or FaceTime — so the assistant view can say what it is listening to. Lines are
+// "phone" or "computer"; it only reports, the audio capture is the same either way.
+let callStateProc = null;
+
+function startCallState(binary) {
+    stopCallState();
+    callStateProc = spawn(binary, [], { stdio: ['ignore', 'pipe', 'pipe'] });
+    callStateProc.stdout.on('data', data => {
+        for (const line of data.toString().split('\n')) {
+            if (line === 'phone' || line === 'computer') sendToRenderer('listening-source', line);
+        }
+    });
+    callStateProc.on('error', err => console.error('CallState error:', err.message));
+}
+
+function stopCallState() {
+    callStateProc?.kill('SIGTERM');
+    callStateProc = null;
+}
+
 function stopMacOSAudioCapture() {
+    stopCallState();
     if (systemAudioProc) {
         console.log('Stopping SystemAudioDump...');
         systemAudioProc.kill('SIGTERM');

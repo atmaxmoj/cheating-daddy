@@ -17,6 +17,12 @@ const NOTES = [
         body: '# Deployment\n\nOne box, docker compose.\n\n## Why bubblewrap and not Docker for the plugin sandbox\n\nThe backend deliberately gets no docker.sock: holding it would give the backend root on the host. So the plugin sandbox runs on bubblewrap, which builds user and mount namespaces without a daemon. Docker would have given full containers, but only by handing the backend the socket.',
     },
     { id: 'n3', path: 'software/project/youteacher', title: 'youteacher', body: 'YouTeacher turns videos into lessons.' },
+    {
+        id: 'n6',
+        path: 'software/project/youteacher/build-times',
+        title: 'build-times',
+        body: 'YouTeacher lesson builds last quarter: 70 percent finished in under two minutes, 25 percent took two to five minutes, 5 percent took over five minutes.',
+    },
     { id: 'n4', path: 'cooking/risotto', title: 'risotto', body: 'Stir the rice slowly.' },
 ];
 

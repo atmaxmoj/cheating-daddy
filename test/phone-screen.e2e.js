@@ -33,11 +33,11 @@ test('phone screen', async t => {
 
     await t.test('the corpus is read at launch, before start is pressed', async () => {
         const deadline = Date.now() + 30_000;
-        while (wikiReads(standmeet.calls) < 5 && Date.now() < deadline) await new Promise(r => setTimeout(r, 200));
-        assert.equal(wikiReads(standmeet.calls), 5, 'every wiki note read while the start screen waits');
+        while (wikiReads(standmeet.calls) < 6 && Date.now() < deadline) await new Promise(r => setTimeout(r, 200));
+        assert.equal(wikiReads(standmeet.calls), 6, 'every wiki note read while the start screen waits');
         const atLaunch = wikiReads(standmeet.calls);
         await win.locator('.start-button').click();
-        await win.getByText('Ready (5 notes)', { exact: false }).waitFor({ timeout: 120_000 });
+        await win.getByText('Ready (6 notes)', { exact: false }).waitFor({ timeout: 120_000 });
         assert.equal(wikiReads(standmeet.calls), atLaunch, 'start reads none of it again');
         assert.ok(standmeet.calls.mcp.some(m => m.params?.name === 'jobs.history' && m.params.arguments.status === 'applied'), 'the briefs are read at start');
     });
