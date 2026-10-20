@@ -73,9 +73,16 @@ function checkSupplement(card, points) {
     };
 }
 
+// CONTEXT_LINE — a line of the card's Context section (how it happened); it is not a point and does
+// not count toward the word limit.
+const CONTEXT_LINE = /^(\*\*Context\b|[-*] (\*\*)?(Then|Weighed|Decided|After):|([-*] )?_?Your notes don't say)/;
+
 function checkAnswer(card, context, c) {
     const all = lines(card);
-    const ls = all.filter(l => !l.startsWith('|') && !l.startsWith('**Why this over') && !l.startsWith('**Supplementary:**'));
+    const ls = all.filter(
+        l => !l.startsWith('|') && !l.startsWith('**Why this over') && !l.startsWith('**Supplementary:**') && !CONTEXT_LINE.test(l),
+    );
+    const story = all.filter(l => CONTEXT_LINE.test(l));
     const key = /^\*\*Key:\s*(.+?)\*\*$/.exec(ls[0] || '');
     const ideas = key ? key[1].split('+').map(s => s.trim()) : [];
     const points = ls.filter(l => /^[-*] /.test(l));
@@ -89,6 +96,10 @@ function checkAnswer(card, context, c) {
         ...checkMatrix(card, context, c),
         ...checkSupplement(card, points),
         retrieval: { ok: c.notes.test(context), why: `context paths ${c.notes}` },
+        contextStory: {
+            ok: story[0]?.startsWith('**Context') && story.slice(1).some(l => /Decided:|Then:|Your notes don't say/i.test(l)),
+            why: `context lines: ${JSON.stringify(story)}`,
+        },
         keyLine: { ok: !!key, why: `first line: ${ls[0]}` },
         keyPlain: {
             ok: ideas.length >= 2 && ideas.length <= 3 && ideas.every(i => i.split(/\s+/).length <= 3),
