@@ -7,6 +7,9 @@ module.exports = {
         extraResource: ['./src/assets/SystemAudioDump', './src/assets/CallState'],
         name: 'Screen Assistant', // StandMeet's build, modified from Cheating Daddy (credited in the app)
         icon: 'src/assets/logo',
+        // Never ship the eval or test output: eval/results holds the owner's retrieved notes
+        // verbatim (private ones too), test-results the e2e screenshots and logs.
+        ignore: [/^\/eval($|\/)/, /^\/test($|\/)/, /^\/test-results($|\/)/, /^\/out($|\/)/],
         // use `security find-identity -v -p codesigning` to find your identity
         // for macos signing
         // also fuck apple
