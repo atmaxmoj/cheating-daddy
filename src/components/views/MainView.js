@@ -710,6 +710,8 @@ export class MainView extends LitElement {
         _roles: { state: true },
         _roleId: { state: true },
         _rolesError: { state: true },
+        _rounds: { state: true },
+        _roundId: { state: true },
         _geminiLiveModel: { state: true },
         _groqModel: { state: true },
         _groqImageModel: { state: true },
@@ -743,6 +745,8 @@ export class MainView extends LitElement {
         this._roles = [];
         this._roleId = '';
         this._rolesError = '';
+        this._rounds = [];
+        this._roundId = 'general';
         this._geminiLiveModel = 'gemini-3.1-flash-live-preview';
         this._groqModel = 'qwen/qwen3.6-27b';
         this._groqImageModel = 'qwen/qwen3.6-27b';
@@ -785,7 +789,9 @@ export class MainView extends LitElement {
             this._openaiKey = creds.openaiKey || '';
             this._deepseekKey = creds.deepseekApiKey || '';
             this._roleId = prefs.standmeetRoleId || '';
+            this._roundId = prefs.interviewRound || 'general';
             this._loadRoles();
+            this._loadRounds();
             this._geminiLiveModel = config.geminiLiveModel || 'gemini-3.1-flash-live-preview';
             this._groqModel = config.groqModel || 'qwen/qwen3.6-27b';
             this._groqImageModel = config.groqImageModel || 'qwen/qwen3.6-27b';
@@ -996,6 +1002,33 @@ export class MainView extends LitElement {
                         ? `${role.description || 'No description'} · reads ${role.corpus_uris.join(', ') || 'published notes only'}`
                         : 'Cues draw on every wiki note. Create a role in StandMeet for each interview to scope them.')}
                 </div>
+            </div>
+        `;
+    }
+
+    // _loadRounds — the interview rounds: each decides what a card may draw on and how it talks.
+    async _loadRounds() {
+        if (!window.require) return;
+        const { ipcRenderer } = window.require('electron');
+        this._rounds = await ipcRenderer.invoke('cues:list-rounds').catch(() => []);
+        this.requestUpdate();
+    }
+
+    async _saveRoundId(val) {
+        this._roundId = val;
+        await cheatingDaddy.storage.updatePreference('interviewRound', val);
+        this.requestUpdate();
+    }
+
+    _renderRoundPicker() {
+        const round = this._rounds.find(r => r.id === this._roundId);
+        return html`
+            <div class="form-group">
+                <label class="form-label">Interview round</label>
+                <select .value=${this._roundId} @change=${e => this._saveRoundId(e.target.value)}>
+                    ${this._rounds.map(r => html`<option value=${r.id} ?selected=${r.id === this._roundId}>${r.label}</option>`)}
+                </select>
+                <div class="form-hint">${round ? round.hint : ''}</div>
             </div>
         `;
     }
@@ -1314,6 +1347,7 @@ export class MainView extends LitElement {
     _renderLocalMode() {
         return html`
             ${this._renderRolePicker()}
+            ${this._renderRoundPicker()}
 
             <details class="config-section">
                 <summary class="config-summary">

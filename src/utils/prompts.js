@@ -277,7 +277,9 @@ Provide direct exam answers in **markdown format**. Include the question text, t
     },
 };
 
-function buildSystemPrompt(promptParts, customPrompt = '', googleSearchEnabled = true) {
+// rules — instructions that override the format (the interview round): last, and outside the
+// user-provided context, which the model reads as material, not as orders.
+function buildSystemPrompt(promptParts, customPrompt = '', googleSearchEnabled = true, rules = '') {
     const sections = [promptParts.intro, '\n\n', promptParts.formatRequirements];
 
     // Only add search usage section if Google Search is enabled
@@ -286,13 +288,14 @@ function buildSystemPrompt(promptParts, customPrompt = '', googleSearchEnabled =
     }
 
     sections.push('\n\n', promptParts.content, '\n\nUser-provided context\n-----\n', customPrompt, '\n-----\n\n', promptParts.outputInstructions);
+    if (rules) sections.push('\n\n', rules);
 
     return sections.join('');
 }
 
-function getSystemPrompt(profile, customPrompt = '', googleSearchEnabled = true) {
+function getSystemPrompt(profile, customPrompt = '', googleSearchEnabled = true, rules = '') {
     const promptParts = profilePrompts[profile] || profilePrompts.interview;
-    return buildSystemPrompt(promptParts, customPrompt, googleSearchEnabled);
+    return buildSystemPrompt(promptParts, customPrompt, googleSearchEnabled, rules);
 }
 
 module.exports = {

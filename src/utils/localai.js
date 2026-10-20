@@ -34,7 +34,8 @@ function systemPromptFor(query) {
     const job = standmeet.noticeCompany(query);
     if (job) sendToRenderer('update-status', `Phone screen: ${job.company}${job.title ? ` — ${job.title}` : ''}`);
     const extra = currentCustomPrompt.trim() ? `\n\n## Also from the user\n${currentCustomPrompt.trim()}` : '';
-    return getSystemPrompt('cues', standmeet.contextFor(query) + extra, false);
+    const round = getPreferences().interviewRound;
+    return getSystemPrompt('cues', standmeet.contextFor(query, round) + extra, false, standmeet.roundRules(round));
 }
 let isLocalActive = false;
 let initializationController = null;

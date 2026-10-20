@@ -297,7 +297,7 @@ async function readCorpus(host, role, onProgress) {
         const full = await client.tool('corpus.get', { genre: item.genre, id: item.id }).catch(() => null);
         onProgress(++done, listed.length);
         const body = full ? full.body : item.preview;
-        return { title: item.title, path: item.path || '', text: cleanBody(body), sections: sections(body) };
+        return { title: item.title, path: item.path || '', tags: item.tags || [], text: cleanBody(body), sections: sections(body) };
     });
     roleBrief = role ? `${role.name}${role.description ? ` — ${role.description}` : ''}` : '';
     const usable = notes.filter(n => n.text || n.title);
@@ -309,8 +309,8 @@ async function readCorpus(host, role, onProgress) {
     // one search unit per section; a note without headings is one unit
     const units = usable.flatMap(n =>
         n.sections.length > 1
-            ? n.sections.map(s => ({ title: s.heading ? `${n.title} › ${s.heading}` : n.title, path: n.path, text: s.text }))
-            : [{ title: n.title, path: n.path, text: n.text }],
+            ? n.sections.map(s => ({ title: s.heading ? `${n.title} › ${s.heading}` : n.title, path: n.path, tags: n.tags, text: s.text }))
+            : [{ title: n.title, path: n.path, tags: n.tags, text: n.text }],
     );
     index = buildIndex(units);
     return usable.length;
@@ -424,23 +424,107 @@ const MATRIX_ON = names =>
     `# Choice matrix: REQUIRED\nThis question names ${names.join(', ')}. Include the choice matrix, ${names[0]} in the first row, alternatives for the same job from the notes. If the notes name no alternative for this job, write the one line _No alternatives in your notes._ in its place.`;
 const MATRIX_OFF = '# Choice matrix: OFF\nThis question names no technology. Do not include a choice matrix.';
 
-// contextFor — the user's projects, then the notes most relevant to what was just said, as prompt
-// text ('' before loading).
-function contextFor(query) {
+// ROUNDS — who is across the table decides what a card may draw on and how it talks (owner,
+// 2026-10-19: "技术面那就只能聊自己懂得技术，但是hr就是没有自己不懂得技术，不同的轮次面试这个也是不一样的").
+// matrix: false keeps the choice matrix off whatever the question names. keep: which kinds of note
+// (noteKind) reach the model at all — a rule in the prompt alone held only some of the time (the
+// Mentor card cited someone else's failure on one run in two), a note it never sees it cannot tell.
+const OWN_WORK = 'your own work';
+const COLLECTED = "someone else's (a fact you collected)";
+const ROUNDS = {
+    general: { label: 'General', hint: 'Any note may help; the card picks its form.', matrix: true, rules: '' },
+    recruiter: {
+        label: 'Recruiter / phone screen',
+        hint: 'Who you are, what you want, whether the basics fit. Short and plain.',
+        matrix: false,
+        rules: 'A recruiter screens fit: background in one breath, what you want next, pay, location, work authorization, timeline. Facts straight from the phone-screen script and the job brief. No technical detail beyond naming what you work on; no choice matrix. At most three short points.',
+    },
+    behavioural: {
+        label: 'HR / behavioural',
+        hint: 'Teamwork, conflict, motivation. Stories, no jargon.',
+        matrix: false,
+        rules: 'The interviewer is not technical. Say what a technical thing achieved in everyday words, as to a friend who is not an engineer (what problem it solved, for whom, what changed): "full control of the server", not "root"; "a background service", not "daemon". Never name flags, commands, code, protocols, sockets or internals, and no choice matrix — the Context too. Prefer the STAR story form, from your own work.',
+    },
+    manager: {
+        label: 'Hiring manager',
+        hint: 'Scope, ownership, trade-offs, impact.',
+        matrix: false,
+        rules: 'The hiring manager wants what you owned, the trade-offs you made and what they changed for users or the business. Name a technology only as the choice it was, with the reason; no internals and no choice matrix.',
+    },
+    technical: {
+        label: 'Technical deep-dive',
+        hint: 'Only technology your own work shows you used — with the details.',
+        matrix: true,
+        keep: kind => kind !== COLLECTED,
+        rules: "Talk only about technology your OWN WORK notes show you used, with the details and numbers they give. A collected fact about a tool (a note marked \"someone else's\") is not you knowing it: when the question names technology your own work does not show, say plainly you have not used it, then the closest thing you did use, if your own work has one.",
+    },
+    design: {
+        label: 'System design',
+        hint: 'A new problem: reason from the patterns you have built.',
+        matrix: true,
+        rules: "The question is a design you have not built. Lead with the approach, then the trade-offs, reasoning from patterns your OWN WORK notes show you built. Mark what you have built (\"in StandMeet I…\") apart from what you would do here; never present a collected fact as your own experience.",
+    },
+    executive: {
+        label: 'Founder / executive',
+        hint: 'Judgement, product sense, why you do this.',
+        matrix: false,
+        rules: 'A founder or executive weighs judgement and motivation: why this problem, what you decided and why, what you learned. No implementation detail and no choice matrix.',
+    },
+    mentor: {
+        label: 'Mentor',
+        hint: 'Only what you took part in yourself.',
+        matrix: false,
+        keep: kind => kind === OWN_WORK,
+        rules: "Talk only about what you took part in yourself: your OWN WORK notes. Never tell a collected fact (a note marked \"someone else's\") or a general idea as your experience — not even as an example. If your own work has nothing on this, say so.",
+    },
+};
+
+// noteKind — whose material a note is, from its tags and place: the rounds above allow some kinds
+// only. The vault's own convention tags someone else's facts `fact`.
+function noteKind(n) {
+    const tags = n.tags || [];
+    if (tags.includes('fact')) return COLLECTED;
+    if (n.path.startsWith('software/project/') || tags.includes('project')) return OWN_WORK;
+    if (tags.includes('idea') || tags.includes('original')) return 'your idea';
+    return 'your note';
+}
+
+// contextFor — the round, the user's projects, then the notes most relevant to what was just said,
+// as prompt text ('' before loading).
+function contextFor(query, roundId = 'general') {
     if (!index) return '';
     // The cue's example must come from the user's own projects, so project notes get their own
     // slots next to the best matches from the whole corpus. A named technology gets its own slots
     // too: the sections most about it are where the notes weigh it against its alternatives.
+    const round = ROUNDS[roundId] || ROUNDS.general;
+    const allowed = n => !round.keep || round.keep(noteKind(n));
     const named = stackIn(query);
-    const general = search(index, query);
-    const fromProjects = search(index, query, PROJECT_K, n => n.path.startsWith('software/project/'));
-    const aboutStack = named.length ? search(index, named.join(' '), STACK_K) : [];
+    const general = search(index, query, TOP_K, allowed);
+    const fromProjects = search(index, query, PROJECT_K, n => n.path.startsWith('software/project/') && allowed(n));
+    const aboutStack = named.length ? search(index, named.join(' '), STACK_K, allowed) : [];
     const picked = [...new Set([...general, ...fromProjects, ...aboutStack])];
-    const notes = picked.map(n => `## ${n.title} (${n.path})\n${n.text.slice(0, CONTEXT_CHARS)}`).join('\n\n');
+    const notes = picked.map(n => `## ${n.title} (${n.path}) — ${noteKind(n)}\n${n.text.slice(0, CONTEXT_CHARS)}`).join('\n\n');
     const brief = roleBrief ? `# This interview\n${roleBrief}\nLead with what matters for this role.\n\n` : '';
-    const matrix = named.length ? MATRIX_ON(named) : MATRIX_OFF;
+    const matrix = named.length && round.matrix ? MATRIX_ON(named) : MATRIX_OFF;
     return `${screenContext()}${brief}${matrix}\n\n# Your projects\n${projects}\n\n# Notes that match what was just said\n${notes}`;
 }
+
+// WHOSE — every round: a collected fact is never the user's experience. Kept in the format rules
+// only, the General card still answered "Have you run Kafka?" with "I've worked alongside Kafka…"
+// from someone else's note; placed last, it holds.
+const WHOSE = `**WHOSE IT IS** — each note is marked. A note marked "someone else's" is what the user read or collected: never say or imply they used, ran, built or worked with what it describes. When only such notes answer "have you used / done X", the answer is that it is not in their own work — then the closest thing their own work does show, if any.`;
+
+// roundRules — the closing orders of the system prompt: whose material is whose, then the round's
+// own rules. They override the card format, so they go after it, not inside the notes.
+function roundRules(roundId) {
+    const round = ROUNDS[roundId];
+    const own = round?.rules ? `\n\n**THIS ROUND: ${round.label}** — these orders override every format rule above, on every line of the card (Context included):\n${round.rules}` : '';
+    return `${WHOSE}\n\n${KEEP_CONTEXT}${own}`;
+}
+
+// KEEP_CONTEXT — in the format rules only, a card with a choice matrix dropped its Context about
+// one time in six (eval 2026-10-19).
+const KEEP_CONTEXT = '**CONTEXT** — every card about the user\'s own work keeps its "Context — how it happened" section, choice matrix or not.';
 
 function isLoaded() {
     return index !== null;
@@ -462,6 +546,8 @@ module.exports = {
     noticeCompany,
     listRoles,
     contextFor,
+    ROUNDS,
+    roundRules,
     isLoaded,
     transcriptionHint,
     cleanBody,

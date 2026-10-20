@@ -78,8 +78,9 @@ async function main() {
             loadedFor = roleKey;
         }
         for (let r = 0; r < REPEAT; r++) {
-            const context = s.contextFor(c.q);
-            const system = getSystemPrompt('cues', context, false);
+            // the General round, built exactly as localai.js builds it (closing rules included)
+            const context = s.contextFor(c.q, 'general');
+            const system = getSystemPrompt('cues', context, false, s.roundRules('general'));
             const started = Date.now();
             const card = await chat(MODEL, [{ role: 'system', content: system }, { role: 'user', content: c.q }]);
             const ms = Date.now() - started;

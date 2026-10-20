@@ -280,6 +280,11 @@ function setupGeneralIpcHandlers() {
         }
     });
 
+    // The interview rounds for the start screen's round picker (the table lives in standmeet.js).
+    ipcMain.handle('cues:list-rounds', async () =>
+        Object.entries(require('./utils/standmeet').ROUNDS).map(([id, r]) => ({ id, label: r.label, hint: r.hint })),
+    );
+
     ipcMain.handle('quit-application', async event => {
         try {
             stopMacOSAudioCapture();

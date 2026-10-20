@@ -24,6 +24,30 @@ const NOTES = [
         body: 'YouTeacher lesson builds last quarter: 70 percent finished in under two minutes, 25 percent took two to five minutes, 5 percent took over five minutes.',
     },
     { id: 'n4', path: 'cooking/risotto', title: 'risotto', body: 'Stir the rice slowly.' },
+    // Rounds (rounds.e2e.js): the owner's own failure next to two collected facts — someone
+    // else's failure and someone else's Kafka — so a round that allows only the owner's own work
+    // can be told apart from one that takes any note.
+    {
+        id: 'n9',
+        path: 'software/project/youteacher/first-launch',
+        title: 'first-launch',
+        tags: ['project', 'youteacher'],
+        body: 'The first YouTeacher launch went wrong: I shipped lesson generation without a review step, teachers found wrong answers in the first week, and I added a review queue before anything is published.',
+    },
+    {
+        id: 'n7',
+        path: 'market/knight-capital',
+        title: 'knight-capital',
+        tags: ['fact', 'software'],
+        body: 'Knight Capital lost 440 million dollars in 45 minutes in 2012 when a failed deploy left old code running on one server. A project that went badly wrong; the industry lesson was to automate deploys.',
+    },
+    {
+        id: 'n8',
+        path: 'software/kafka-at-linkedin',
+        title: 'kafka-at-linkedin',
+        tags: ['fact'],
+        body: 'Kafka was built at LinkedIn to move trillions of messages a day; teams run Kafka in production as a durable log between services.',
+    },
 ];
 
 // The phone screen: the owner's fixed script (a subjectivity note) and the briefs the job loop keeps
@@ -86,7 +110,7 @@ async function startStandMeet() {
         if (name === 'corpus.list') {
             if (args.genre !== 'wiki') return ok({ items: [] });
             const start = Number(args.cursor || 0); // two per page: the app must follow next_cursor
-            const items = NOTES.slice(start, start + 2).map(({ id, path, title }) => ({ id, path, title, preview: '' }));
+            const items = NOTES.slice(start, start + 2).map(({ id, path, title, tags = [] }) => ({ id, path, title, tags, preview: '' }));
             return ok({ items, ...(start + 2 < NOTES.length ? { next_cursor: String(start + 2) } : {}) });
         }
         if (name === 'corpus.get') return ok({ body: NOTES.find(n => n.id === args.id).body });
