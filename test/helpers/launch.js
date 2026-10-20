@@ -89,6 +89,6 @@ async function launchApp(t, standmeetUrl, micWav = silentWav()) {
 }
 
 // say — the other side of the call, spoken through the speakers.
-const say = text => new Promise((resolve, reject) => execFile('say', ['-v', 'Samantha', '-r', '170', text], e => (e ? reject(e) : resolve())));
+const say = (text, voice = 'Samantha') => new Promise((resolve, reject) => execFile('say', ['-v', voice, '-r', '170', text], e => (e ? reject(e) : resolve())));
 
 module.exports = { ROOT, launchApp, say };

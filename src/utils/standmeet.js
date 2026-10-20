@@ -534,8 +534,16 @@ let vocabulary = '';
 
 // transcriptionHint — the user's own names (projects and top-level topics) for Whisper's prompt,
 // so "StandMeet" is not heard as "stand meet". '' before loading.
+// The stack names go in too, with each plain spelling their pattern accepts ("bwrap", "k8s"):
+// without them Whisper heard "bwrap" as "BRAP" and "Postgres" as "post grey" (eval/stt.js).
 function transcriptionHint() {
-    return [vocabulary, ...jobs.map(j => j.company)].filter(Boolean).join(', ');
+    if (!vocabulary) return '';
+    const spellings = Object.entries(STACK).flatMap(([name, re]) => [
+        name,
+        ...(/\(([^)]*)\)/.exec(re.source)?.[1].split('|').filter(w => /^[a-z0-9]+$/i.test(w)) || []),
+    ]);
+    const names = [...vocabulary.split(', '), ...spellings, ...jobs.map(j => j.company)];
+    return [...new Map(names.map(n => [n.toLowerCase(), n])).values()].join(', ');
 }
 
 module.exports = {
