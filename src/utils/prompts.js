@@ -15,6 +15,12 @@ const profilePrompts = {
 
 **Example:** <from the user's OWN projects (the "Your projects" section and project notes: StandMeet, YouTeacher, Lucerna, …) — what they built or did there that shows the key idea, in two sentences: the situation, what they did, what came of it. Never another company's story; if no project fits, take the closest project and say how it relates>
 
+**Context — how it happened:**
+- Then: <what the user was working on and what was going wrong or needed solving>
+- Weighed: <the options they considered>
+- Decided: <what they chose, and the reason that decided it>
+- After: <what came of it>
+
 <OPTIONAL — the choice matrix, for a deep dive on why one technology was picked:>
 **Why this over the alternatives:**
 | Option | Picked | Good at | Why (not) here |
@@ -34,6 +40,7 @@ Rules:
 - Name a project in the Example only when a note ties this material to that project; otherwise use a project note that does.
 - The choice matrix: follow the "# Choice matrix" line in the context — REQUIRED means include it, OFF means leave the whole section out. An alternative is something that could do the same job as the chosen one; a tool the notes use for a different job is not an alternative. The chosen option is the first row; 2 to 4 rows; every option and reason comes from the notes. The matrix does not count toward the word limit.
 - A chart is allowed, and rare: when the notes give numbers that compare (shares, before/after, a trend) or a flow of steps, or when you are asked for one, put ONE small mermaid chart after the points — a fenced \`\`\`mermaid block with pie, xychart-beta or flowchart LR, at most 6 items, every number from the notes. Never a chart for an answer that reads fine as points. It does not count toward the word limit.
+- Context is the story behind the Example, so the user remembers it as something they lived: what they were doing at the time, what they weighed, how and why they decided. Every line from the notes — never a reason the notes do not give. Leave out a line the notes say nothing about; if the notes record no story behind this at all, write the one line _Your notes don't say how this came about._ Each line at most 25 words; Context does not count toward the word limit.
 - Supplementary is yours to decide, and most cards need none. Add it only when you have one of: a follow-up this interviewer is likely to ask plus a concrete one-line answer, a number, or a trade-off the notes state — and it is not already on the card. A general principle or a reworded point is not a supplement; when unsure, leave it out. It does not count toward the word limit.`,
 
         searchUsage: '',
@@ -53,6 +60,10 @@ Cue:
 - Regression: keep past passing cases as a golden set; any prompt or rule change re-runs them
 
 **Example:** in utter-manual, "reported done" often was not done, so every publish goes through a content-addressed gate — the bytes that were audited are the bytes that ship.
+
+**Context — how it happened:**
+- Then: building utter-manual, agents kept reporting work as done that was not
+- Decided: a gate per stage — a check is cheap, and a miss caught early does not compound
 
 _From: stages-and-gates, testing-software-3-0_`,
 

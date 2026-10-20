@@ -1,5 +1,5 @@
 // fake-servers.js — a local stand-in for the StandMeet instance (owner MCP at POST /mcp):
-// initialize, corpus.list/get, jobs.history, role_list, assistant.push. Every call is recorded so a test can
+// initialize, corpus.list/get, jobs.history, role_list, assistant.push/read. Every call is recorded so a test can
 // check what the app sent. The real server's side of assistant.push has its own e2e in the
 // StandMeet repo (e2e/test/screen-assistant.spec.ts).
 //
@@ -52,6 +52,11 @@ const ROLES = [
 
 async function startStandMeet() {
     const calls = { mcp: [], pushes: [] };
+    // feed — the instance's screen-assistant feed: the app's own pushes and what another agent
+    // injects (inject), read back by assistant.read the way the real store does (one event per id,
+    // latest text, after `since`).
+    const feed = [];
+    const append = e => feed.push({ ...e, seq: feed.length + 1, at: new Date().toISOString() });
     let sessions = 0;
     const live = new Set();
 
@@ -88,13 +93,26 @@ async function startStandMeet() {
         if (name === 'role_list') return ok({ items: ROLES });
         if (name === 'assistant.push') {
             calls.pushes.push(args);
-            return ok({ seq: calls.pushes.length });
+            append(args);
+            return ok({ seq: feed.length });
+        }
+        if (name === 'assistant.read') {
+            const since = Number(args.since || 0);
+            const after = feed.filter(e => e.seq > since);
+            const latest = new Map();
+            for (const e of after) latest.set(e.id, e);
+            return ok({ events: [...latest.values()], last_seq: after.at(-1)?.seq ?? since });
         }
         return json(res, 200, { jsonrpc: '2.0', id: msg.id, result: { isError: true, content: [{ type: 'text', text: `unknown tool ${name}` }] } });
     });
 
     await new Promise(r => server.listen(0, '127.0.0.1', r));
-    return { url: `http://127.0.0.1:${server.address().port}`, calls, close: () => new Promise(r => server.close(r)) };
+    return {
+        url: `http://127.0.0.1:${server.address().port}`,
+        calls,
+        inject: append, // another agent's assistant.push
+        close: () => new Promise(r => server.close(r)),
+    };
 }
 
 function readBody(req) {

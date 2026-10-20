@@ -4,8 +4,8 @@
 //
 // Contract:
 //   - Two streams: computer audio is "Them" (transcribed, cued, pushed to the phone feed); the
-//     microphone is "Me" (transcribed only: no cue, nothing to the model, nothing to the feed —
-//     the feed has no field to say whose line it is).
+//     microphone is "Me" (transcribed only: no cue, nothing to the model; the feed gets it as
+//     kind=said, so an agent running a mock interview can read the answer back).
 //   - The sidebar shows both, labelled, in time order.
 //   - The saved session keeps both tracks; History shows them under Transcript.
 //
@@ -60,7 +60,8 @@ test('two tracks', async t => {
         assert.match(text, /platform migration/i);
         assert.match(text, /\bMe\b/, 'labelled as mine');
         await new Promise(r => setTimeout(r, 6000));
-        assert.equal(standmeet.calls.pushes.length, 0, 'nothing went to the phone feed: no heard line, no cue');
+        assert.deepEqual(standmeet.calls.pushes.map(p => p.kind), ['said'], 'the feed got my line as said: no heard line, no cue');
+        assert.match(standmeet.calls.pushes[0].text, /platform migration/i);
         assert.doesNotMatch(await win.locator('#responseContainer').innerText(), /Key:/, 'no card for my own words');
     });
 

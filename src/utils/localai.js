@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { getSystemPrompt } = require('./prompts');
 const { sendToRenderer, initializeNewSession, saveConversationTurn, saveTranscriptLine } = require('./gemini');
-const { publishTranscript, publishCue, newCueID } = require('./feed');
+const { publishTranscript, publishSaid, publishCue, newCueID, startPulling, stopPulling } = require('./feed');
 const standmeet = require('./standmeet');
 const { getCredentials, getPreferences } = require('../storage');
 const {
@@ -262,18 +262,31 @@ async function handleSpeechEnd(source, audioData) {
             return;
         }
 
-        const line = { text: transcription, source, at: Date.now() };
-        sendToRenderer('transcript-line', line);
-        saveTranscriptLine(line);
-        if (source === 'me') return;
-
-        sendToRenderer('update-status', 'Generating response...');
-        publishTranscript(transcription);
-        await sendToLlama(transcription);
+        if (source === 'me') publishSaid(transcription);
+        else publishTranscript(transcription);
+        await takeLine(source, transcription);
     } catch (error) {
         console.error('[LocalAI] Transcription error:', error);
         sendToRenderer('update-status', 'Transcription error: ' + error.message);
     }
+}
+
+// takeLine — one line of the conversation, heard or pulled from the feed: into the transcript, and
+// the other side's line on to the model for a cue. The owner's own line is kept for review only.
+async function takeLine(source, text) {
+    const line = { text, source, at: Date.now() };
+    sendToRenderer('transcript-line', line);
+    saveTranscriptLine(line);
+    if (source === 'me') return;
+    sendToRenderer('update-status', 'Generating response...');
+    await sendToLlama(text);
+}
+
+// takeFeedEvent — a line another agent pushed (a mock interview): its question is "them", its
+// record of the owner's answer is "me".
+function takeFeedEvent(e) {
+    if (!isLocalActive) return;
+    takeLine(e.kind === 'said' ? 'me' : 'them', e.text).catch(error => console.error('[LocalAI] feed line:', error.message));
 }
 
 async function readStreamingResponse(response, onText) {
@@ -627,6 +640,7 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
 
         initializeNewSession(profile, customPrompt);
         isLocalActive = true;
+        await startPulling(takeFeedEvent);
         initializationController = null;
         sendToRenderer('local-ai-download-progress', { active: false });
         sendToRenderer('session-initializing', false);
@@ -665,6 +679,7 @@ function processLocalAudio(monoChunk24k, source = 'them') {
 
 function closeLocalSession() {
     isLocalActive = false;
+    stopPulling();
     initializationController?.abort();
     initializationController = null;
     stopNativeServer(llamaProcess);
