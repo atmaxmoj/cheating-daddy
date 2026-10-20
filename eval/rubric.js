@@ -109,8 +109,10 @@ function checkAnswer(card, context, c) {
         answerLine: { ok: /^\*\*[^*].*\*\*$/.test(ls[1] || '') && !/^\*\*(Key|Example)/.test(ls[1] || ''), why: `second line: ${ls[1]}` },
         points: { ok: points.length >= 3 && points.length <= 4, why: `${points.length} points` },
         pointsHaveDetail: { ok: points.length > 0 && points.every(p => words(p).length >= 6), why: 'every point ≥ 6 words' },
+        // The Example is optional (6319c8f: only when a note ties a project to the answer; never
+        // stretched in). When there is one, it names one of the user's own projects.
         ownExample: {
-            ok: projects.some(p => example.toLowerCase().includes(p.toLowerCase().replace(/-/g, ' ')) || example.toLowerCase().includes(p.toLowerCase())),
+            ok: !example || projects.some(p => example.toLowerCase().includes(p.toLowerCase().replace(/-/g, ' ')) || example.toLowerCase().includes(p.toLowerCase())),
             why: `example "${example.slice(0, 80)}" vs projects ${JSON.stringify(projects)}`,
         },
         fromIsReal: {
