@@ -124,10 +124,21 @@ function checkAnswer(card, context, c) {
     };
 }
 
+// checkRound — a round case: what the card must not say (forbid), must say (must), and whether a
+// choice matrix is out of place (noTable).
+function checkRound(card, c) {
+    const out = {};
+    if (c.forbid) out.roundForbid = { ok: !c.forbid.test(card), why: `matched ${c.forbid}: ${card.slice(0, 160)}` };
+    if (c.must) out.roundMust = { ok: c.must.test(card), why: `no ${c.must}: ${card.slice(0, 160)}` };
+    if (c.noTable) out.roundNoTable = { ok: !/^\|.*\|$/m.test(card), why: 'a table on the card' };
+    return out;
+}
+
 function check(card, context, c) {
     const t = card.trim();
     if (c.kind === 'smalltalk') return { dash: { ok: t === '—' || t === '-', why: `got "${t.slice(0, 60)}"` } };
     if (c.kind === 'outside') return { notInNotes: { ok: /^Not in your notes/i.test(t), why: `got "${t.slice(0, 80)}"` } };
+    if (c.kind === 'round') return checkRound(card, c);
     return checkAnswer(card, context, c);
 }
 

@@ -5,8 +5,8 @@
 // Contract:
 //   - A ```mermaid fence in a card renders as a diagram once the fence is closed. While it streams,
 //     and when the diagram does not parse, the card shows the code — never an error message.
-//   - The cue prompt lets the model draw a chart when numbers are clearer as one; the phone feed
-//     (assistant.push) still gets the raw markdown.
+//   - A card StandMeet made with a chart (assistant.cue) renders it; the feed keeps the raw
+//     markdown. Whether the model draws one is the server's prompt (npm run eval).
 //   - While listening, an indicator says what is heard: "Listening: computer audio", or "Listening:
 //     phone call" while a call runs on this Mac (iPhone calls answered here, FaceTime). A real call is
 //     the only way to reach the second state, so this spec covers the first.
@@ -61,19 +61,11 @@ test('cue cards', async t => {
         assert.doesNotMatch(await win.locator('body').innerText(), ERROR_TEXT);
     });
 
-    await t.test('the model draws a chart from the notes; the phone gets the markdown', async () => {
-        const before = standmeet.calls.pushes.length;
+    await t.test('a typed question: the server’s chart card renders; the feed keeps the markdown', async () => {
         await win.locator('#textInput').fill('How are your YouTeacher build times split? Show it as a pie chart.');
         await win.locator('#textInput').press('Enter');
         await card.locator('svg').first().waitFor({ timeout: 60_000 });
-        const deadline = Date.now() + 10_000;
-        let last;
-        while (Date.now() < deadline) {
-            last = standmeet.calls.pushes.slice(before).filter(p => p.kind === 'cue').at(-1);
-            if (last && /From:/.test(last.text)) break;
-            await new Promise(r => setTimeout(r, 200));
-        }
-        assert.ok(last, 'a cue was pushed');
-        assert.match(last.text, /```mermaid[\s\S]*pie[\s\S]*70/, 'the phone gets the raw chart markdown');
+        assert.match(standmeet.calls.cues.at(-1).question, /pie chart/, 'the typed line is the question');
+        assert.match(standmeet.cards().at(-1).text, /```mermaid[\s\S]*pie[\s\S]*70/, 'the feed has the raw chart markdown');
     });
 });

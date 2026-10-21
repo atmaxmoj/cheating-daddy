@@ -8,9 +8,22 @@
 // matrix: set when the question names a technology in the owner's stack — the card must carry
 //   the choice matrix, `chosen` in the first row, every `alts` among the rows. Unset on an
 //   answer case: the card must carry NO matrix (a general question, even on the same topic).
-// role: the StandMeet role to load (null = every wiki note).
+// role: the StandMeet role to load (null = every wiki note). round: the interview round (default
+// general).
+//   round      — a round's orders (owner, 2026-10-19: "技术面那就只能聊自己懂得技术，但是hr就是没有自己不懂得
+//                技术"): the card must not match `forbid`, must match `must`, and with noTable has no
+//                choice matrix. These were app e2e specs while the card was made in the app.
+
+// CLAIMS_KAFKA — the card says the owner used Kafka (the General round once answered "Yes — I've
+// worked with Kafka" from someone else's note).
+const CLAIMS_KAFKA = /\b(I|we)('ve| have)? (ran|run|used|operated|built|worked (with|alongside|on))\b[^.\n]*(kafka|a log like)|^yes\b/im;
+// HR_JARGON — implementation words a non-technical interviewer should not get.
+const HR_JARGON = /docker\.sock|namespaces?|--\w|\broot\b|socket|daemon/i;
 
 module.exports = [
+    { q: 'Have you run Kafka in production?', kind: 'round', round: 'general', forbid: CLAIMS_KAFKA },
+    { q: 'Have you run Kafka in production?', kind: 'round', round: 'technical', forbid: CLAIMS_KAFKA },
+    { q: 'Why did you use bubblewrap for the plugin sandbox instead of Docker?', kind: 'round', round: 'behavioural', forbid: HR_JARGON, noTable: true },
     {
         q: 'What problem does StandMeet solve?',
         kind: 'answer',

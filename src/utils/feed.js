@@ -1,24 +1,21 @@
-// feed.js — streams what the assistant hears and the cue cards it writes to StandMeet
-// (owner MCP `assistant.push`), so /admin/screen-assistant shows them live on a phone. It also
-// pulls the feed (`assistant.read`): another agent running a mock interview pushes its question
-// (heard) and the owner's answer (said) there, and the app takes them as if it had heard them.
+// feed.js — the app's line to StandMeet's screen assistant (owner MCP). It pushes what the app
+// hears (assistant.push heard / said), asks for the cue card (assistant.cue — the card is made on
+// the server and streamed into the feed), and pulls the feed (assistant.read): the growing cards,
+// and the lines another agent running a mock interview pushes there.
 //
-// Fire-and-forget: a slow or unreachable StandMeet never holds up the cue on the desktop.
-// Pushes go out one at a time, in order, so a late partial never overwrites a finished cue.
-// A failed push reconnects and tries once more (a restarted instance forgets MCP sessions).
+// Pushes are fire-and-forget: a slow or unreachable StandMeet never holds up the transcript. They
+// go out one at a time, in order. A failed call reconnects and tries once more (a restarted
+// instance forgets MCP sessions).
 
 const crypto = require('crypto');
 const { getPreferences } = require('../storage');
 const { createClient } = require('./standmeet');
 
-const CUE_THROTTLE_MS = 300;
-const PULL_MS = 1000;
+const PULL_MS = 400; // a card grows on screen at this pace
 
 let client = null;
 let queue = Promise.resolve();
-let pendingCue = null;
-let cueTimer = null;
-const own = new Set(); // ids this app pushed: pulled back, they are not someone else's
+const own = new Set(); // lines this app pushed: pulled back, they are not someone else's
 let pullTimer = null;
 
 // connected — the client for the host in settings now; a changed host gets a fresh session.
@@ -32,18 +29,23 @@ async function connected() {
     return client;
 }
 
+// call — one owner MCP tool call. A transport failure reconnects and tries once more; the tool's
+// own answer ("no such role") is thrown as it is.
+async function call(name, args) {
+    try {
+        return await (await connected()).tool(name, args);
+    } catch (error) {
+        if (error.message.startsWith(`StandMeet ${name}:`)) throw error;
+        client = null;
+        return (await connected()).tool(name, args);
+    }
+}
+
 function push(event) {
     own.add(event.id);
     queue = queue
-        .then(() => connected().then(c => c.tool('assistant.push', event)))
-        .catch(() => {
-            client = null;
-            return connected().then(c => c.tool('assistant.push', event));
-        })
-        .catch(error => {
-            client = null;
-            console.error('[feed]', error.message);
-        });
+        .then(() => call('assistant.push', event))
+        .catch(error => console.error('[feed]', error.message));
     return queue;
 }
 
@@ -57,25 +59,25 @@ function publishSaid(text) {
     return push({ kind: 'said', id: crypto.randomUUID(), text });
 }
 
-// startPulling — calls onEvent({kind, text}) for each heard or said line another agent pushes from
-// now on. What was already in the feed is history, not a question to answer.
+// startPulling — calls onEvent(event) for each card in the feed (growing text under one id, from
+// this app's asks or another agent's) and each heard or said line another agent pushes, from now
+// on. What was already in the feed is history, not a question to answer.
 async function startPulling(onEvent) {
     stopPulling();
     let since = null;
     const tick = async () => {
         try {
-            const c = await connected();
-            const { events, last_seq: last } = await c.tool('assistant.read', { since: since ?? 0 });
+            const { events, last_seq: last } = await call('assistant.read', { since: since ?? 0 });
             const fresh = since === null ? [] : events;
             since = last;
             for (const e of fresh) {
-                if (!own.has(e.id) && (e.kind === 'heard' || e.kind === 'said')) {
+                if (e.kind === 'cue') onEvent(e);
+                else if (!own.has(e.id)) {
                     own.add(e.id);
                     onEvent(e);
                 }
             }
         } catch (error) {
-            client = null;
             console.error('[feed] pull', error.message);
         }
     };
@@ -88,28 +90,9 @@ function stopPulling() {
     pullTimer = null;
 }
 
-// newCueID — one id per cue; the page keeps the latest text under it.
+// newCueID — one id per card; the feed keeps the latest text under it.
 function newCueID() {
     return crypto.randomUUID();
-}
-
-// publishCue — partial updates are throttled; the final one always goes out.
-function publishCue(id, text, final) {
-    pendingCue = { kind: 'cue', id, text };
-    if (final) {
-        clearTimeout(cueTimer);
-        cueTimer = null;
-        const event = pendingCue;
-        pendingCue = null;
-        return push(event);
-    }
-    if (cueTimer) return queue;
-    cueTimer = setTimeout(() => {
-        cueTimer = null;
-        if (pendingCue) push(pendingCue);
-        pendingCue = null;
-    }, CUE_THROTTLE_MS);
-    return queue;
 }
 
 // flushed — resolves once every push queued so far has settled (tests; quitting).
@@ -117,4 +100,4 @@ function flushed() {
     return queue;
 }
 
-module.exports = { publishTranscript, publishSaid, publishCue, newCueID, flushed, startPulling, stopPulling };
+module.exports = { call, publishTranscript, publishSaid, newCueID, flushed, startPulling, stopPulling };

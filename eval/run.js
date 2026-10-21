@@ -1,22 +1,23 @@
-// run.js — `npm run eval`: the cue agent against the owner's real corpus and the real model.
+// run.js — `npm run eval`: the cue card, as StandMeet makes it (assistant.cue), on the owner's
+// real corpus and model.
 //
-// For each case in cases.js: load the corpus (scoped to the case's role), build the exact prompt
-// the app sends (cues profile + contextFor), ask DeepSeek the way the app does, then score:
+// For each case in cases.js: ask assistant.cue (the case's role and round, debug on, so the
+// context comes back with the card), then score:
 //   · the deterministic rubric (rubric.js) — format, Key, own-project example, real sources;
 //   · a judge model (JUDGE_MODEL) — answers-as-asked, grounded, speakable, each 1–5.
-// Writes eval/results/<time>.json and exits 1 when a check's pass rate is under PASS_RATE.
+// Writes eval/results/<time>.json and exits 1 when a check's pass rate is under PASS_RATE. Every
+// card also lands in the owner's screen-assistant feed, as any card does.
 //
-// Needs: ~/.standmeet/credentials.json (or $STANDMEET_CREDS_PATH), a DeepSeek key
+// Needs: ~/.standmeet/credentials.json (or $STANDMEET_CREDS_PATH), a DeepSeek key for the judge
 // ($DEEPSEEK_API_KEY, else the one saved in the app). Flags: --repeat N, --only <substring>.
 
 const fs = require('fs');
 const path = require('path');
 const s = require('../src/utils/standmeet');
-const { getSystemPrompt } = require('../src/utils/prompts');
 const { getPreferences } = require('../src/storage');
 const cases = require('./cases');
 const { check } = require('./rubric');
-const { chat, judge, MODEL, JUDGE_MODEL, KEY } = require('./model');
+const { judge, JUDGE_MODEL, KEY } = require('./model');
 
 const HOST = process.env.STANDMEET_HOST || getPreferences().standmeetHost || 'https://sijie.xyz';
 const PASS_RATE = 0.9; // per check, across all runs
@@ -31,10 +32,12 @@ const ONLY = arg('--only', '');
 
 
 async function main() {
-    if (!KEY) throw new Error('no DeepSeek key: set DEEPSEEK_API_KEY or save one in the app');
+    if (!KEY) throw new Error('no DeepSeek key for the judge: set DEEPSEEK_API_KEY or save one in the app');
+    const client = s.createClient(HOST);
+    await client.connect();
     const roles = await s.listRoles(HOST);
-    let loadedFor = null; // the role the index holds now; reload when a case needs another
     const results = [];
+    let model = '';
 
     for (const c of cases.filter(x => x.q.includes(ONLY))) {
         const role = c.role ? roles.find(r => r.name === c.role) : null;
@@ -42,18 +45,15 @@ async function main() {
             console.log(`skip (no role ${c.role} on ${HOST}): ${c.q}`);
             continue;
         }
-        const roleKey = role?.name || '(all wiki)';
-        if (loadedFor !== roleKey) {
-            console.log(`loading ${roleKey}: ${await s.loadCorpus(HOST, role)} notes`);
-            loadedFor = roleKey;
-        }
+        const roleKey = `${role?.name || '(all wiki)'}${c.round ? ` / ${c.round}` : ''}`;
         for (let r = 0; r < REPEAT; r++) {
-            // the General round, built exactly as localai.js builds it (closing rules included)
-            const context = s.contextFor(c.q, 'general');
-            const system = getSystemPrompt('cues', context, false, s.roundRules('general'));
+            const ask = { question: c.q, round: c.round || 'general', debug: true, ...(role ? { role_id: role.id } : {}) };
             const started = Date.now();
-            const card = await chat(MODEL, [{ role: 'system', content: system }, { role: 'user', content: c.q }]);
+            const out = await client.tool('assistant.cue', ask);
             const ms = Date.now() - started;
+            const { card } = out;
+            const { context } = out.debug;
+            model = out.model;
             const checks = check(card, context, c);
             if (c.kind === 'answer') {
                 const j = await judge(c.q, context, card);
@@ -80,12 +80,12 @@ async function main() {
     const answers = results.filter(r => r.kind === 'answer');
     console.log(`supplementary added on ${answers.filter(r => r.card.includes('**Supplementary:**')).length}/${answers.length} answer cards (the model's call)`);
     const ms = results.map(r => r.ms).sort((a, b) => a - b);
-    console.log(`latency (full card, non-streamed): median ${ms[Math.floor(ms.length / 2)]} ms, max ${ms.at(-1)} ms`);
+    console.log(`latency (whole card through assistant.cue): median ${ms[Math.floor(ms.length / 2)]} ms, max ${ms.at(-1)} ms`);
 
     const dir = path.join(__dirname, 'results');
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-    fs.writeFileSync(file, JSON.stringify({ host: HOST, model: MODEL, judge: JUDGE_MODEL, results }, null, 2));
+    fs.writeFileSync(file, JSON.stringify({ host: HOST, model, judge: JUDGE_MODEL, results }, null, 2));
     console.log(`report: ${file}`);
     process.exit(gate ? 0 : 1);
 }

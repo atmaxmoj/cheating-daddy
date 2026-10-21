@@ -280,10 +280,8 @@ function setupGeneralIpcHandlers() {
         }
     });
 
-    // The interview rounds for the start screen's round picker (the table lives in standmeet.js).
-    ipcMain.handle('cues:list-rounds', async () =>
-        Object.entries(require('./utils/standmeet').ROUNDS).map(([id, r]) => ({ id, label: r.label, hint: r.hint })),
-    );
+    // The interview rounds for the start screen's round picker (StandMeet holds the table).
+    ipcMain.handle('cues:list-rounds', async () => (await require('./utils/localai').preloadCorpus())?.rounds || []);
 
     ipcMain.handle('quit-application', async event => {
         try {

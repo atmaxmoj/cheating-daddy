@@ -1,9 +1,9 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { getSystemPrompt } = require('./prompts');
 const { sendToRenderer, initializeNewSession, saveConversationTurn, saveTranscriptLine } = require('./gemini');
-const { publishTranscript, publishSaid, publishCue, newCueID, startPulling, stopPulling } = require('./feed');
-const standmeet = require('./standmeet');
+const { call, publishTranscript, publishSaid, newCueID, startPulling, stopPulling } = require('./feed');
 const { getCredentials, getPreferences } = require('../storage');
 const {
     ensureNativeBinary,
@@ -26,17 +26,11 @@ let currentSystemPrompt = null;
 let currentProfile = null;
 let currentCustomPrompt = '';
 
-// systemPromptFor — the Cue Cards profile draws its context per question from the user's
-// StandMeet corpus (the notes that match what was just said); anything typed in AI Context rides
-// along. Every other profile keeps the fixed prompt built at session start.
-function systemPromptFor(query) {
-    if (currentProfile !== 'cues' || !standmeet.isLoaded()) return currentSystemPrompt;
-    const job = standmeet.noticeCompany(query);
-    if (job) sendToRenderer('update-status', `Phone screen: ${job.company}${job.title ? ` — ${job.title}` : ''}`);
-    const extra = currentCustomPrompt.trim() ? `\n\n## Also from the user\n${currentCustomPrompt.trim()}` : '';
-    const round = getPreferences().interviewRound;
-    return getSystemPrompt('cues', standmeet.contextFor(query, round) + extra, false, standmeet.roundRules(round));
-}
+// cueSession — the Cue Cards profile's session with StandMeet: the role (none = every wiki note),
+// one call id for the whole interview (the server keeps the conversation and the job a phone
+// screen locks onto), and the names for Whisper's prompt. Every other profile keeps the fixed
+// prompt built at session start and its own model.
+let cueSession = null;
 let isLocalActive = false;
 let initializationController = null;
 let llamaCacheSnapshot = new Set();
@@ -222,8 +216,9 @@ async function transcribeAudio(pcm16kBuffer) {
     formData.append('response_format', 'json');
     formData.append('temperature', '0.0');
     formData.append('language', 'en');
-    // The user's project names bias Whisper toward their spelling ("StandMeet", not "stand meet").
-    const hint = standmeet.transcriptionHint();
+    // The user's own names (projects, stack, companies — assistant.prepare) bias Whisper toward
+    // their spelling ("StandMeet", not "stand meet"; "bwrap", not "BRAP").
+    const hint = cueSession?.hint;
     if (hint) formData.append('prompt', `Interview about ${hint}.`);
 
     const response = await fetch(`${whisperBaseUrl}/inference`, {
@@ -283,11 +278,40 @@ async function takeLine(source, text) {
     await sendToLlama(text);
 }
 
-// takeFeedEvent — a line another agent pushed (a mock interview): its question is "them", its
-// record of the owner's answer is "me".
+// takeFeedEvent — from the feed: a card (growing under its id — this app's or another agent's
+// ask), or a line another agent pushed (a mock interview): its question is "them", its record of
+// the owner's answer is "me".
 function takeFeedEvent(e) {
     if (!isLocalActive) return;
+    if (e.kind === 'cue') return showCue(e.id, e.text);
     takeLine(e.kind === 'said' ? 'me' : 'them', e.text).catch(error => console.error('[LocalAI] feed line:', error.message));
+}
+
+// showCue — a card on screen: a new id starts a new card, the same id grows it.
+let shownCue = null;
+function showCue(id, text) {
+    if (!text) return;
+    sendToRenderer(id === shownCue ? 'update-response' : 'new-response', text);
+    shownCue = id;
+}
+
+// cueOnServer — the card for the other side's line, made by StandMeet from the role's notes; it
+// streams into the feed (startPulling shows it as it grows) and comes back whole.
+async function cueOnServer(line) {
+    const id = newCueID();
+    const ask = { question: line, round: getPreferences().interviewRound || 'general', call_id: cueSession.callId, id };
+    if (cueSession.roleId) ask.role_id = cueSession.roleId;
+    if (currentCustomPrompt.trim()) ask.user_context = currentCustomPrompt.trim();
+    try {
+        const { card } = await call('assistant.cue', ask);
+        showCue(id, card);
+        saveConversationTurn(line, card);
+        sendToRenderer('update-status', 'Listening...');
+    } catch (error) {
+        console.error('[LocalAI] cue:', error);
+        sendToRenderer('update-status', 'Cue error: ' + error.message.replace(/^StandMeet [\w.]+: /, ''));
+        throw error;
+    }
 }
 
 async function readStreamingResponse(response, onText) {
@@ -349,6 +373,7 @@ async function requestLlama(messages, onText) {
 }
 
 async function sendToLlama(transcription) {
+    if (cueSession) return cueOnServer(transcription.trim());
     localConversationHistory.push({
         role: 'user',
         content: transcription.trim(),
@@ -359,19 +384,16 @@ async function sendToLlama(transcription) {
     }
 
     try {
-        const system = systemPromptFor(transcription) || 'You are a helpful assistant.';
+        const system = currentSystemPrompt || 'You are a helpful assistant.';
         const messages = [{ role: 'system', content: system }, ...localConversationHistory];
 
         let isFirst = true;
-        const cueID = newCueID();
         const fullText = await requestLlama(messages, text => {
             sendToRenderer(isFirst ? 'new-response' : 'update-response', text);
-            publishCue(cueID, text, false);
             isFirst = false;
         });
 
         if (fullText.trim()) {
-            publishCue(cueID, fullText, true);
             localConversationHistory.push({
                 role: 'assistant',
                 content: fullText.trim(),
@@ -547,29 +569,17 @@ async function startLlamaServer(executablePath, modelPath, projectorPath) {
     await waitForServer(`${llamaBaseUrl}/health`, llamaProcess, 30 * 60 * 1000);
 }
 
-const DEFAULT_HOST = 'https://sijie.xyz';
-let preloading = Promise.resolve();
-
-// preloadCorpus — reads the corpus for the saved host + role while the app waits on the start
-// screen, so one key starts a session without the 20 s read. A failure is only logged: the session
-// start reads again and reports it.
-function preloadCorpus() {
-    preloading = (async () => {
-        const prefs = getPreferences();
-        const host = prefs.standmeetHost || DEFAULT_HOST;
-        const role = await findRole(host, prefs.standmeetRoleId);
-        if (standmeet.loadedCount(host, role) === null) await standmeet.loadCorpus(host, role);
-    })().catch(error => console.warn('[LocalAI] corpus preload failed:', error.message));
-    return preloading;
+// prepareArgs — the role picked on the start screen (none = every wiki note).
+function prepareArgs() {
+    const roleId = getPreferences().standmeetRoleId;
+    return roleId ? { role_id: roleId } : {};
 }
 
-// findRole — the role picked on the start screen; null when none is picked. A picked role that no
-// longer exists is an error, not a silent fall back to the whole corpus.
-async function findRole(host, roleId) {
-    if (!roleId) return null;
-    const role = (await standmeet.listRoles(host)).find(r => r.id === roleId);
-    if (!role) throw new Error('the chosen role no longer exists — pick another on the start screen');
-    return role;
+// preloadCorpus — asks StandMeet to load the saved role's notes while the app waits on the start
+// screen, so the first card of a session does not wait for it. A failure is only logged: the
+// session start asks again and reports it.
+function preloadCorpus() {
+    return call('assistant.prepare', prepareArgs()).catch(error => console.warn('[LocalAI] prepare failed:', error.message));
 }
 
 async function initializeLocalSession(model, whisperModel, profile, customPrompt) {
@@ -585,50 +595,28 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
         currentCustomPrompt = customPrompt || '';
         llamaModel = model;
 
-        const usesApi = isApiModel(model);
-        if (usesApi && !getCredentials().deepseekApiKey) {
+        // Cue Cards: the card is made on StandMeet, from the role chosen for this interview; this
+        // app needs no model of its own for it, only Whisper.
+        const cues = profile === 'cues';
+        const usesApi = cues || isApiModel(model);
+        if (!cues && usesApi && !getCredentials().deepseekApiKey) {
             throw new Error('Add your DeepSeek API key to use DeepSeek');
         }
+        const prepared = cues ? call('assistant.prepare', prepareArgs()).then(p => ({ p }), error => ({ error })) : Promise.resolve({});
 
-        // Cue Cards: the corpus, scoped to the StandMeet role chosen for this interview (none =
-        // every wiki note). The app reads it at launch (preloadCorpus); only a different role reads
-        // again (about 20 s for ~700 notes). The phone screen script and the job briefs are read
-        // fresh every time — a brief written an hour before the call must be there.
-        let corpusProgress = '';
-        const prefs = getPreferences();
-        const host = prefs.standmeetHost || DEFAULT_HOST;
-        await preloading;
-        const corpusLoad =
-            profile === 'cues'
-                ? findRole(host, prefs.standmeetRoleId)
-                      .then(async role => {
-                          const [count] = await Promise.all([
-                              standmeet.loadedCount(host, role) ??
-                                  standmeet.loadCorpus(host, role, (done, total) => {
-                                      corpusProgress = `${done}/${total}`;
-                                  }),
-                              standmeet.loadScreen(host),
-                          ]);
-                          return count;
-                      })
-                      .then(
-                          count => ({ count }),
-                          error => ({ error }),
-                      )
-                : Promise.resolve({ count: 0 });
-
-        const nativeFiles = await prepareNativeFiles(model, whisperModel, initializationController.signal);
+        const nativeFiles = await prepareNativeFiles(cues ? API_PREFIX : model, whisperModel, initializationController.signal);
         validatePreparedNativeFiles(nativeFiles, usesApi);
 
         sendToRenderer('update-status', 'Starting Whisper...');
         sendDownloadProgress('Starting Whisper');
         await startWhisperServer(nativeFiles.whisperBinaryPath, nativeFiles.whisperModelPath);
 
-        const ticker = setInterval(() => sendToRenderer('update-status', `Reading your corpus... ${corpusProgress}`), 500);
-        const corpus = await corpusLoad.finally(() => clearInterval(ticker));
+        sendToRenderer('update-status', 'Reading your corpus...');
+        const corpus = await prepared;
         if (corpus.error) {
-            throw new Error(`Could not read your StandMeet corpus: ${corpus.error.message}`);
+            throw new Error(`Could not reach your StandMeet notes: ${corpus.error.message.replace(/^StandMeet [\w.]+: /, '')}`);
         }
+        if (cues) cueSession = { roleId: getPreferences().standmeetRoleId || null, callId: crypto.randomUUID(), hint: corpus.p.hint };
 
         if (!usesApi) {
             sendToRenderer('update-status', 'Loading local language model...');
@@ -645,7 +633,7 @@ async function initializeLocalSession(model, whisperModel, profile, customPrompt
         initializationController = null;
         sendToRenderer('local-ai-download-progress', { active: false });
         sendToRenderer('session-initializing', false);
-        sendToRenderer('update-status', corpus.count ? `Ready (${corpus.count} notes) - Listening...` : 'Local AI ready - Listening...');
+        sendToRenderer('update-status', cues ? `Ready (${corpus.p.notes} notes) - Listening...` : 'Local AI ready - Listening...');
         console.log('[LocalAI] Native session initialized successfully');
         return true;
     } catch (error) {
@@ -680,6 +668,8 @@ function processLocalAudio(monoChunk24k, source = 'them') {
 
 function closeLocalSession() {
     isLocalActive = false;
+    cueSession = null;
+    shownCue = null;
     stopPulling();
     initializationController?.abort();
     initializationController = null;

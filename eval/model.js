@@ -1,8 +1,7 @@
-// model.js — the eval's model calls: DeepSeek as the app asks it, and the judge that grades a card.
+// model.js — the judge that grades a card (the card itself comes from StandMeet's assistant.cue).
 
-const { getCredentials, getPreferences } = require('../src/storage');
+const { getCredentials } = require('../src/storage');
 
-const MODEL = (process.env.CUE_MODEL || getPreferences().localLlmModel || 'deepseek:deepseek-flash').replace(/^deepseek:/, '');
 const JUDGE_MODEL = process.env.JUDGE_MODEL || 'deepseek-v4-pro';
 const KEY = process.env.DEEPSEEK_API_KEY || getCredentials().deepseekApiKey;
 
@@ -36,4 +35,4 @@ async function judge(q, context, card) {
     return JSON.parse(m[0]);
 }
 
-module.exports = { chat, judge, MODEL, JUDGE_MODEL, KEY };
+module.exports = { judge, JUDGE_MODEL, KEY };

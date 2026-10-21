@@ -56,11 +56,16 @@ async function transcribe(file) {
     form.append('response_format', 'json');
     form.append('temperature', '0.0');
     form.append('language', 'en');
-    const hint = s.transcriptionHint();
+    const hint = session.hint;
     if (hint) form.append('prompt', `Interview about ${hint}.`);
     const res = await fetch(`http://127.0.0.1:${PORT}/inference`, { method: 'POST', body: form });
     return ((await res.json()).text || '').trim();
 }
+
+// session — the StandMeet client and the Whisper hint it gives (assistant.prepare).
+const session = { client: null, hint: '' };
+// contextFor — the context StandMeet builds for this line (assistant.context, General round).
+const contextFor = async question => (await session.client.tool('assistant.context', { question })).context;
 
 const notesIn = context => [...context.matchAll(/^## .*\(([^)]+)\)/gm)].map(m => m[1]);
 
@@ -99,17 +104,21 @@ async function main() {
     fs.mkdirSync(path.join(__dirname, 'results'), { recursive: true });
     try {
         await startWhisper();
-        console.log(`loading: ${await s.loadCorpus(HOST, null)} notes`);
+        session.client = s.createClient(HOST);
+        await session.client.connect();
+        const prepared = await session.client.tool('assistant.prepare', {});
+        session.hint = prepared.hint;
+        console.log(`loading: ${prepared.notes} notes`);
         const results = [];
         for (const c of cases.filter(x => x.kind === 'answer' && !x.role && x.q.includes(ONLY))) {
-            const clean = notesIn(s.contextFor(c.q, 'general'));
+            const clean = notesIn(await contextFor(c.q));
             console.log(`\n${c.q}`);
             for (const voice of VOICES) {
                 for (const condition of Object.keys(CONDITIONS)) {
                     const wav = path.join(tmp, 'q.wav');
                     speak(c.q, voice, condition, wav);
                     const heard = await heardAs(wav);
-                    const context = s.contextFor(heard, 'general');
+                    const context = heard ? await contextFor(heard) : '';
                     const got = notesIn(context);
                     const overlap = clean.length ? clean.filter(p => got.includes(p)).length / clean.length : 1;
                     const retrieval = c.notes.test(context);
