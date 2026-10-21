@@ -12,6 +12,8 @@
         "test": "node --test --test-concurrency=1 --test-timeout=300000 test/*.e2e.js",
         "eval": "node eval/run.js",
         "eval:stt": "node eval/stt.js",
+        "eval:accents": "node eval/accents.js",
+        "eval:rewrite": "node eval/rewrite.js",
         "lint": "echo \"No linting configured\""
     },
     "keywords": [
