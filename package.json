@@ -12,6 +12,7 @@
         "test": "node --test --test-concurrency=1 --test-timeout=300000 test/*.e2e.js",
         "eval": "node eval/run.js",
         "eval:stt": "node eval/stt.js",
+        "eval:parity": "node eval/parity.js",
         "lint": "echo \"No linting configured\""
     },
     "keywords": [
